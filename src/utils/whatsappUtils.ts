@@ -1,0 +1,457 @@
+import html2pdf from 'html2pdf.js';
+import {
+  generateBillHtml,
+  generateLedgerStatementHtml,
+  generateParticularsListPrintHtml,
+  generatePerformaHtml,
+  generateAllPerformasPrintHtml,
+  generateCustomerListPrintHtml,
+} from './printUtils';
+import type { BillPrintData } from '../components/BillPrintTemplate';
+
+/**
+ * Normalizes phone numbers for WhatsApp (adds 91 if 10-digit Indian number)
+ */
+export const normalizeWhatsAppPhone = (phone?: string): string => {
+  if (!phone) return '';
+  const digits = String(phone).replace(/\D/g, '');
+  if (digits.length === 10) return `91${digits}`;
+  if (digits.length > 10 && digits.startsWith('0')) return `91${digits.slice(1)}`;
+  return digits;
+};
+
+/**
+ * Generates an in-memory PDF Blob from raw HTML using html2pdf.js matching exact A4 print format
+ */
+export const generatePdfBlobFromHtml = async (html: string, fileName: string): Promise<File | null> => {
+  return new Promise((resolve) => {
+    try {
+      const cleanFileName = fileName.endsWith('.pdf') ? fileName : `${fileName}.pdf`;
+      const isLandscape = html.includes('size: A4 landscape') || html.includes('landscape');
+      const targetWidth = isLandscape ? 1123 : 794;
+      const targetHeight = isLandscape ? 794 : 1123;
+
+      const iframe = document.createElement('iframe');
+      iframe.style.position = 'fixed';
+      iframe.style.top = '0';
+      iframe.style.left = '0';
+      iframe.style.width = `${targetWidth}px`;
+      iframe.style.height = `${targetHeight}px`;
+      iframe.style.zIndex = '-99999';
+      iframe.style.opacity = '1';
+      iframe.style.visibility = 'visible';
+      iframe.style.border = 'none';
+      iframe.style.pointerEvents = 'none';
+      document.body.appendChild(iframe);
+
+      const doc = iframe.contentDocument || iframe.contentWindow?.document;
+      if (!doc) {
+        if (document.body.contains(iframe)) document.body.removeChild(iframe);
+        resolve(null);
+        return;
+      }
+
+      doc.open();
+      doc.write(html);
+      doc.close();
+
+      if (doc.body) {
+        doc.body.style.width = `${targetWidth}px`;
+        doc.body.style.margin = '0';
+        doc.body.style.padding = '0';
+        doc.body.style.backgroundColor = '#FFFFFF';
+      }
+
+      // Allow 400ms for browser layout engine to render tables, inline CSS, borders, and fonts
+      setTimeout(async () => {
+        try {
+          const target = doc.body;
+          const opt = {
+            margin: 0,
+            filename: cleanFileName,
+            image: { type: 'jpeg', quality: 0.98 },
+            html2canvas: {
+              scale: 2,
+              useCORS: true,
+              logging: false,
+              backgroundColor: '#FFFFFF',
+              windowWidth: targetWidth,
+              scrollX: 0,
+              scrollY: 0,
+            },
+            jsPDF: {
+              unit: 'mm',
+              format: 'a4',
+              orientation: isLandscape ? 'landscape' : 'portrait',
+            },
+            pagebreak: {
+              mode: ['css', 'legacy'],
+              after: ['.print-page', '.page-break-after'],
+              avoid: ['tr', '.data-row', '.sig-section', '.signature-section', '.company-banner', '.kpi-summary-grid', '.page-total-row', '.grand-total-row'],
+            },
+          };
+
+          const worker = (html2pdf() as any).set(opt).from(target);
+          const pdfBlob: Blob = await worker.output('blob');
+
+          if (document.body.contains(iframe)) {
+            document.body.removeChild(iframe);
+          }
+
+          if (pdfBlob && pdfBlob.size > 200) {
+            resolve(new File([pdfBlob], cleanFileName, { type: 'application/pdf' }));
+          } else {
+            console.warn('[PDF Gen] Generated PDF Blob is too small or empty');
+            resolve(null);
+          }
+        } catch (err) {
+          console.error('[PDF Generation Worker Error]:', err);
+          if (document.body.contains(iframe)) {
+            document.body.removeChild(iframe);
+          }
+          resolve(null);
+        }
+      }, 400);
+    } catch (e) {
+      console.error('[PDF Gen Error]:', e);
+      resolve(null);
+    }
+  });
+};
+
+/**
+ * Base dispatcher: tries Web Share API with attached PDF File;
+ * falls back to direct WhatsApp Web/App URL with pre-filled message
+ * AND automatically downloads the exact same generated PDF file on Desktop browsers.
+ */
+export const shareToWhatsApp = async (options: {
+  title: string;
+  text: string;
+  fileName: string;
+  html?: string;
+  phone?: string;
+}) => {
+  const { title, text, fileName, html, phone } = options;
+  const cleanFileName = fileName.endsWith('.pdf') ? fileName : `${fileName}.pdf`;
+  const cleanPhone = normalizeWhatsAppPhone(phone);
+
+  let pdfFile: File | null = null;
+  if (html) {
+    pdfFile = await generatePdfBlobFromHtml(html, cleanFileName);
+  }
+
+  // 1. Try Native Web Share API if device/browser supports file sharing (Mobile, Tablets, Mac/Windows Edge)
+  if (pdfFile && navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
+    try {
+      await navigator.share({
+        files: [pdfFile],
+        title,
+        text,
+      });
+      return;
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        console.warn('[WebShare API failed, falling back to WhatsApp URL]:', err);
+      } else {
+        return; // User cancelled share sheet
+      }
+    }
+  }
+
+  // 2. Direct PDF Download fallback for Desktop browsers:
+  // Automatically saves the exact generated PDF to Downloads so the user can easily attach it in WhatsApp Web
+  if (pdfFile) {
+    try {
+      const blobUrl = URL.createObjectURL(pdfFile);
+      const downloadLink = document.createElement('a');
+      downloadLink.href = blobUrl;
+      downloadLink.download = cleanFileName;
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      document.body.removeChild(downloadLink);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+    } catch (dErr) {
+      console.warn('[Direct PDF Download fallback failed]:', dErr);
+    }
+  }
+
+  // 3. WhatsApp URL fallback (Desktop Web / Mobile App deep link)
+  const encodedText = encodeURIComponent(text);
+  const waUrl = cleanPhone
+    ? `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodedText}`
+    : `https://api.whatsapp.com/send?text=${encodedText}`;
+
+  window.open(waUrl, '_blank');
+};
+
+/**
+ * 1. Share Particular Bill on WhatsApp
+ */
+export const shareBillOnWhatsApp = async (bill: BillPrintData, phone?: string) => {
+  const itemsText = (bill.products || [])
+    .map(
+      (p, i) =>
+        `${i + 1}. *${p.particular}* - ${p.quantity} Cases @ ₹${p.rate}${p.pktUnit && p.pktUnit !== '-' ? ` (${p.pktUnit}/pkt)` : ''} = *₹${p.amount}*`
+    )
+    .join('\n');
+
+  const rawDisc = parseFloat(String(bill.discount || '0').replace(/[^0-9.]/g, '')) || 0;
+  const rawPack = parseFloat(String(bill.packing || '0').replace(/[^0-9.]/g, '')) || 0;
+  const rawTax = parseFloat(String(bill.tax || '0').replace(/[^0-9.]/g, '')) || 0;
+
+  const text = `*SIMBA - INVOICE BILL* 🧾
+----------------------------------------
+*Bill No:* #${bill.billNo}
+*Customer:* ${bill.customerName}
+${bill.companyName && bill.companyName !== 'General' ? `*Company:* ${bill.companyName}\n` : ''}*Date:* ${bill.date}
+*Transport:* ${bill.transport || '-'}
+*Cases:* ${bill.caseCount || '-'}
+----------------------------------------
+*ITEMS:*
+${itemsText || '-'}
+----------------------------------------
+*Subtotal:* ₹${bill.amount || '0.00'}
+*Discount:* ${rawDisc > 0 ? `${bill.discount}${String(bill.discount).includes('%') ? '' : '%'}` : '0%'}
+*Packing:* ${rawPack > 0 ? `${bill.packing}${String(bill.packing).includes('%') ? '' : '%'}` : '0%'}
+*Tax:* ₹${rawTax > 0 ? rawTax.toLocaleString('en-IN') : '0.00'}
+*NET TOTAL:* ₹${bill.total || '0.00'}
+----------------------------------------
+_Thank you for your business!_
+*Simba*`;
+
+  const html = generateBillHtml(bill);
+  await shareToWhatsApp({
+    title: `Bill #${bill.billNo} - ${bill.customerName}`,
+    text,
+    fileName: `Bill-${bill.billNo}-${bill.customerName.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`,
+    html,
+    phone: phone || bill.phone,
+  });
+};
+
+/**
+ * 2. Share Account Ledger Statement on WhatsApp
+ */
+export const shareLedgerOnWhatsApp = async (
+  customerName: string,
+  accountDetails: any[],
+  fromDate?: string,
+  toDate?: string,
+  phone?: string
+) => {
+  const totalDebit = accountDetails.reduce((sum, r) => sum + (parseFloat(String(r.debit).replace(/,/g, '')) || 0), 0);
+  const totalCredit = accountDetails.reduce((sum, r) => sum + (parseFloat(String(r.credit).replace(/,/g, '')) || 0), 0);
+  const netBalance = totalDebit - totalCredit;
+
+  const dateRangeStr = fromDate || toDate ? ` (${fromDate || 'Start'} to ${toDate || 'Present'})` : '';
+
+  const text = `*SIMBA - ACCOUNT STATEMENT* 📊
+----------------------------------------
+*Customer:* ${customerName}${dateRangeStr}
+*Total Transactions:* ${accountDetails.length}
+----------------------------------------
+*Total Debit (Bills):* ₹${totalDebit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+*Total Credit (Received):* ₹${totalCredit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+*NET BALANCE:* ₹${netBalance.toLocaleString('en-IN', { minimumFractionDigits: 2 })} ${netBalance > 0 ? '(Due)' : netBalance < 0 ? '(Advance)' : '(Settled)'}
+----------------------------------------
+_Generated on ${new Date().toLocaleDateString('en-GB')}_
+*Simba*`;
+
+  const rangeLabel = fromDate || toDate ? `${fromDate || ''} - ${toDate || ''}` : undefined;
+  const html = generateLedgerStatementHtml(customerName, accountDetails, rangeLabel);
+  await shareToWhatsApp({
+    title: `Account Statement - ${customerName}`,
+    text,
+    fileName: `Ledger-${customerName.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`,
+    html,
+    phone,
+  });
+};
+
+/**
+ * 3. Share Particulars Statement / List on WhatsApp
+ */
+export const shareParticularsListOnWhatsApp = async (
+  customerName: string,
+  particularDetails: any[],
+  fromDate?: string,
+  toDate?: string,
+  phone?: string
+) => {
+  const totalAmount = particularDetails.reduce(
+    (sum, r) => sum + (parseFloat(String(r.total || r.amount).replace(/,/g, '')) || 0),
+    0
+  );
+  const totalCases = particularDetails.reduce(
+    (sum, r) => sum + (parseFloat(String(r.caseCount).replace(/,/g, '')) || 0),
+    0
+  );
+
+  const text = `*SIMBA - PARTICULAR BILLS STATEMENT* 📋
+----------------------------------------
+*Customer:* ${customerName}
+*Total Bills:* ${particularDetails.length}
+*Total Cases:* ${totalCases}
+*Total Billed Amount:* ₹${totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+----------------------------------------
+_Generated on ${new Date().toLocaleDateString('en-GB')}_
+*Simba*`;
+
+  const rangeLabel = fromDate || toDate ? `${fromDate || ''} - ${toDate || ''}` : undefined;
+  const html = generateParticularsListPrintHtml(particularDetails, rangeLabel);
+  await shareToWhatsApp({
+    title: `Particulars List - ${customerName}`,
+    text,
+    fileName: `Particulars-${customerName.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`,
+    html,
+    phone,
+  });
+};
+
+/**
+ * 4. Share Performa Quotation on WhatsApp
+ */
+export const sharePerformaOnWhatsApp = async (performa: any, phone?: string) => {
+  const custName = performa.customerSnapshot?.name || performa.customerName || 'Customer';
+  const pfNum = performa.performaNumber || 'PF';
+  const totalCases = performa.totalCases || performa.products?.reduce((s: number, p: any) => s + (Number(p.requiredCases) || 0), 0) || 0;
+  const rawSubtotal = (performa.products || []).reduce((s: number, p: any) => s + (Number(p.allocatedAmount) || ((Number(p.requiredCases) || 0) * (Number(p.rate) || 0) * (Number(p.pktPerUnit) || 1)) || 0), 0);
+  const subtotalVal = performa.subtotal !== undefined ? Number(performa.subtotal) : rawSubtotal;
+  const cleanDisc = String(performa.discount || '0').trim();
+  const discNum = parseFloat(cleanDisc) || 0;
+  let discountAmt = performa.discountAmount !== undefined ? Number(performa.discountAmount) : 0;
+  if (!discountAmt && discNum > 0) {
+    if (cleanDisc.endsWith('%') || discNum <= 100) {
+      discountAmt = (subtotalVal * discNum) / 100;
+    } else {
+      discountAmt = discNum;
+    }
+  }
+  const baseAfterDiscount = Math.max(0, subtotalVal - discountAmt);
+  const cleanPack = String(performa.packing || '0').trim();
+  const packNum = parseFloat(cleanPack) || 0;
+  let packingAmt = performa.packingAmount !== undefined ? Number(performa.packingAmount) : 0;
+  if (!packingAmt && packNum > 0) {
+    if (cleanPack.endsWith('%') || packNum <= 100) {
+      packingAmt = (baseAfterDiscount * packNum) / 100;
+    } else {
+      packingAmt = packNum;
+    }
+  }
+  const cleanTax = String(performa.tax || '0').trim().replace(/[^0-9.]/g, '');
+  const taxAmt = performa.taxAmount !== undefined ? Number(performa.taxAmount) : (parseFloat(cleanTax) || 0);
+
+  const totalAmount =
+    performa.totalAllocatedAmount !== undefined
+      ? performa.totalAllocatedAmount
+      : performa.totalAmount || Math.max(0, subtotalVal - discountAmt + packingAmt + taxAmt);
+
+  const itemsText = (performa.products || [])
+    .map((p: any, i: number) => {
+      const pName = p.productSnapshot?.productName || p.productName || 'Product';
+      const compName = p.productSnapshot?.companyName || p.companyName || '';
+      const compLabel = compName ? ` [${compName}]` : '';
+      const pCases = p.requiredCases || 0;
+      const pRate = p.rate || 0;
+      const pAlloc = p.allocatedAmount || (Number(pCases) * Number(pRate) * (Number(p.pktPerUnit) || 1));
+      return `${i + 1}. *${pName}*${compLabel} - ${pCases} Cases @ ₹${pRate} = *₹${Number(pAlloc).toLocaleString('en-IN', { minimumFractionDigits: 2 })}*`;
+    })
+    .join('\n');
+
+  const text = `*SIMBA - PERFORMA INVOICE / QUOTATION* 📝
+----------------------------------------
+*Performa No:* #${pfNum}
+*Customer:* ${custName}
+*Date:* ${performa.date || '-'}
+*Status:* ${performa.status || 'Active'}
+----------------------------------------
+*PRODUCTS ALLOCATION:*
+${itemsText || '-'}
+----------------------------------------
+*Total Cases:* ${totalCases}
+*Subtotal:* ₹${subtotalVal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+${discountAmt > 0 ? `*Discount:* ${performa.discount ? `${performa.discount}${String(performa.discount).includes('%') ? '' : '%'}` : ''} (-₹${discountAmt.toLocaleString('en-IN', { minimumFractionDigits: 2 })})\n` : ''}${packingAmt > 0 ? `*Packing:* ${performa.packing ? `${performa.packing}${String(performa.packing).includes('%') ? '' : '%'}` : ''} (+₹${packingAmt.toLocaleString('en-IN', { minimumFractionDigits: 2 })})\n` : ''}${taxAmt > 0 ? `*Tax:* ₹${taxAmt.toLocaleString('en-IN', { minimumFractionDigits: 2 })}\n` : ''}*TOTAL ALLOCATED VALUE:* ₹${Number(totalAmount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+----------------------------------------
+*Simba*`;
+
+  const html = generatePerformaHtml(performa);
+  await shareToWhatsApp({
+    title: `Performa #${pfNum} - ${custName}`,
+    text,
+    fileName: `Performa-${pfNum}-${custName.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`,
+    html,
+    phone: phone || performa.customerSnapshot?.phone,
+  });
+};
+
+/**
+ * 5. Share All Performas List / Summary on WhatsApp
+ */
+export const shareAllPerformasOnWhatsApp = async (
+  performas: any[],
+  summaryTitle: string = 'All Performas',
+  fromDate?: string,
+  toDate?: string,
+  phone?: string
+) => {
+  const totalPerformas = performas.length;
+  const totalCases = performas.reduce((acc, p) => acc + (parseFloat(p.totalCases || p.totalRequiredCases) || 0), 0);
+  const totalValue = performas.reduce((acc, p) => acc + (parseFloat(p.totalAmount || p.totalAllocatedAmount) || 0), 0);
+
+  const text = `*SIMBA - PERFORMA SUMMARY* 📊
+----------------------------------------
+*Title:* ${summaryTitle}
+*Total Performas:* ${totalPerformas}
+*Total Cases:* ${totalCases}
+*Total Value:* ₹${totalValue.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+----------------------------------------
+_Generated on ${new Date().toLocaleDateString('en-GB')}_
+*Simba*`;
+
+  const rangeLabel = fromDate || toDate ? `${fromDate || ''} - ${toDate || ''}` : undefined;
+  const html = generateAllPerformasPrintHtml(performas, summaryTitle, rangeLabel);
+  await shareToWhatsApp({
+    title: `Performa Summary - ${summaryTitle}`,
+    text,
+    fileName: `Performas-Summary-${summaryTitle.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`,
+    html,
+    phone,
+  });
+};
+
+/**
+ * 6. Share Customer List / Master Report on WhatsApp
+ */
+export const shareCustomerListOnWhatsApp = async (
+  customers: any[],
+  reportTitle: string = 'Customers Master Report',
+  fromDate?: string,
+  toDate?: string,
+  phone?: string
+) => {
+  const totalCustomers = customers.length;
+  const totalDebit = customers.reduce((acc, c) => acc + (parseFloat(c.totalDebit) || 0), 0);
+  const totalCredit = customers.reduce((acc, c) => acc + (parseFloat(c.totalCredit) || 0), 0);
+  const totalDue = customers.reduce((acc, c) => acc + (parseFloat(c.pendingDue) || 0), 0);
+
+  const text = `*SIMBA - CUSTOMERS MASTER REPORT* 👥
+----------------------------------------
+*Title:* ${reportTitle}
+*Total Customers:* ${totalCustomers}
+*Total Purchases (Debit):* ₹${totalDebit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+*Total Received (Credit):* ₹${totalCredit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+*Total Pending Due:* ₹${totalDue.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+----------------------------------------
+_Generated on ${new Date().toLocaleDateString('en-GB')}_
+*Simba*`;
+
+  const rangeLabel = fromDate || toDate ? `${fromDate || ''} - ${toDate || ''}` : undefined;
+  const html = generateCustomerListPrintHtml(customers, reportTitle, rangeLabel);
+  await shareToWhatsApp({
+    title: reportTitle,
+    text,
+    fileName: `Customers-Report-${reportTitle.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`,
+    html,
+    phone,
+  });
+};
