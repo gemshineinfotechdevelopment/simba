@@ -63,7 +63,7 @@ From the root directory:
 npm run dev:all
 ```
 *Frontend runs on `http://localhost:5173` (or `5000`)*  
-*Backend API runs on `http://localhost:5001`*
+*Backend API runs on `http://localhost:5034`*
 
 ### 2. Run Only Frontend
 From the root directory:

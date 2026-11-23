@@ -1,7 +1,7 @@
 # Simba - VPS Deployment Guide (Ubuntu)
 
 Target Domain / Subdomain: `simba.gemshine.tech`  
-Backend Port: `5004`  
+Backend Port: `5034`  
 Database: Local MongoDB on VPS (`mongodb://127.0.0.1:27017/simba`)
 
 ---
@@ -18,7 +18,7 @@ Database: Local MongoDB on VPS (`mongodb://127.0.0.1:27017/simba`)
             ┌────────────────────┴────────────────────┐
             │                                         │
      Static Frontend                           Backend API
-    (/var/www/simba/dist)                (http://127.0.0.1:5004/api)
+    (/var/www/simba/dist)                (http://127.0.0.1:5034/api)
                                                       │
                                            ┌──────────┴──────────┐
                                            ▼                     ▼
@@ -82,7 +82,17 @@ sudo systemctl start mongod
 sudo systemctl enable mongod
 sudo systemctl status mongod
 ```
-MongoDB will now run on `127.0.0.1:27017` and start automatically on boot.
+MongoDB runs locally on `127.0.0.1:27017` and starts automatically on boot.
+
+### 2.3 Verify and Initialize 'simba' Database:
+MongoDB creates the `simba` database automatically when the first record is inserted. You can verify it via `mongosh`:
+```bash
+mongosh
+use simba
+db.stats()
+exit
+```
+*(When you run `npm --prefix server run seed` in Step 5, all collections and admin accounts will be automatically created inside the `simba` database).*
 
 ---
 
@@ -116,7 +126,7 @@ nano server/.env
 ```
 Paste the following:
 ```env
-PORT=5004
+PORT=5034
 NODE_ENV=production
 MONGODB_URI=mongodb://127.0.0.1:27017/simba
 CORS_ORIGIN=https://simba.gemshine.tech
@@ -151,7 +161,7 @@ npm --prefix server run seed
 
 ## 🚀 Step 6: Start Backend with PM2
 
-Start the Node API server on port 5004:
+Start the Node API server on port 5034:
 ```bash
 cd /var/www/simba
 pm2 start ecosystem.config.cjs

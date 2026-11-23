@@ -45,8 +45,6 @@ export const LoginPage: FC<LoginPageProps> = ({ onLoginSuccess }) => {
       if (res && res.token) {
         localStorage.setItem('simba_auth_token', res.token);
         localStorage.setItem('simba_auth_user', JSON.stringify(res.user || { username: username.trim(), role: 'admin' }));
-        localStorage.removeItem('dheeksha_auth_token');
-        localStorage.removeItem('dheeksha_auth_user');
         onLoginSuccess(res.user || { username: username.trim(), role: 'admin' });
       }
     } catch (err: any) {
@@ -54,14 +52,11 @@ export const LoginPage: FC<LoginPageProps> = ({ onLoginSuccess }) => {
       // Fallback offline verification if server is unreachable or initial run
       if (
         (username.trim().toLowerCase() === 'admin' && (password === 'admin123' || password === 'admin')) ||
-        (username.trim().toLowerCase() === 'simba' && (password === 'simba123' || password === 'admin123')) ||
-        (username.trim().toLowerCase() === 'dheeksha' && (password === 'dheeksha123' || password === 'admin123'))
+        (username.trim().toLowerCase() === 'simba' && (password === 'simba123' || password === 'admin123'))
       ) {
         const fallbackUser = { username: username.trim().toLowerCase(), role: 'admin' };
         localStorage.setItem('simba_auth_token', 'local-admin-token');
         localStorage.setItem('simba_auth_user', JSON.stringify(fallbackUser));
-        localStorage.removeItem('dheeksha_auth_token');
-        localStorage.removeItem('dheeksha_auth_user');
         onLoginSuccess(fallbackUser);
       } else {
         setErrorMsg(err.message || 'Invalid username or password. Default: admin / admin123');

@@ -45,7 +45,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 
   // Retrieve auth token if stored
   const token = typeof window !== 'undefined'
-    ? (localStorage.getItem('simba_auth_token') || localStorage.getItem('dheeksha_auth_token'))
+    ? localStorage.getItem('simba_auth_token')
     : null;
 
   const headers: Record<string, string> = {

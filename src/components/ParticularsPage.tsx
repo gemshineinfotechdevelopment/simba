@@ -89,7 +89,6 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
     return (
       initialSubTab ||
       (localStorage.getItem('simba_particular_subtab') as ParticularSubTab) ||
-      (localStorage.getItem('dheeksha_particular_subtab') as ParticularSubTab) ||
       'Select Customer'
     );
   });
@@ -1229,7 +1228,6 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                       setFilterCustomer('');
                       setAddCreditCustomerName('');
                       localStorage.removeItem('simba_active_customer');
-                      localStorage.removeItem('dheeksha_active_customer');
                     }
                   }}
                   renderInput={(params) => (

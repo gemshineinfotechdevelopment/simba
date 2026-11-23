@@ -15,11 +15,11 @@ import { AllPerformaPage } from './components/AllPerformaPage';
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    return Boolean(localStorage.getItem('simba_auth_token') || localStorage.getItem('dheeksha_auth_token'));
+    return Boolean(localStorage.getItem('simba_auth_token'));
   });
 
   const [activeTab, setActiveTab] = useState<NavTab>(() => {
-    const saved = (localStorage.getItem('simba_active_tab') || localStorage.getItem('dheeksha_active_tab')) as NavTab;
+    const saved = localStorage.getItem('simba_active_tab') as NavTab;
     const validTabs: NavTab[] = [
       'Performa',
       'All Performa',
@@ -33,31 +33,19 @@ function App() {
   });
 
   const [companySubView, setCompanySubView] = useState<'list' | 'add'>(() => {
-    return (
-      (localStorage.getItem('simba_company_subview') as 'list' | 'add') ||
-      (localStorage.getItem('dheeksha_company_subview') as 'list' | 'add') ||
-      'list'
-    );
+    return (localStorage.getItem('simba_company_subview') as 'list' | 'add') || 'list';
   });
 
   const [customerSubView, setCustomerSubView] = useState<'list' | 'add'>(() => {
-    return (
-      (localStorage.getItem('simba_customer_subview') as 'list' | 'add') ||
-      (localStorage.getItem('dheeksha_customer_subview') as 'list' | 'add') ||
-      'list'
-    );
+    return (localStorage.getItem('simba_customer_subview') as 'list' | 'add') || 'list';
   });
 
   const [selectedCustomerName, setSelectedCustomerName] = useState<string>(() => {
-    return localStorage.getItem('simba_active_customer') || localStorage.getItem('dheeksha_active_customer') || '';
+    return localStorage.getItem('simba_active_customer') || '';
   });
 
   const [particularInitialSubTab, setParticularInitialSubTab] = useState<ParticularSubTab>(() => {
-    return (
-      (localStorage.getItem('simba_particular_subtab') as ParticularSubTab) ||
-      (localStorage.getItem('dheeksha_particular_subtab') as ParticularSubTab) ||
-      'Select Customer'
-    );
+    return (localStorage.getItem('simba_particular_subtab') as ParticularSubTab) || 'Select Customer';
   });
 
   const handleLoginSuccess = () => {
@@ -73,16 +61,6 @@ function App() {
     localStorage.removeItem('simba_particular_subtab');
     localStorage.removeItem('simba_active_customer');
     localStorage.removeItem('simba_performa_subtab');
-
-    // Also clear legacy keys
-    localStorage.removeItem('dheeksha_auth_token');
-    localStorage.removeItem('dheeksha_auth_user');
-    localStorage.removeItem('dheeksha_active_tab');
-    localStorage.removeItem('dheeksha_company_subview');
-    localStorage.removeItem('dheeksha_customer_subview');
-    localStorage.removeItem('dheeksha_particular_subtab');
-    localStorage.removeItem('dheeksha_active_customer');
-    localStorage.removeItem('dheeksha_performa_subtab');
     setIsAuthenticated(false);
   };
 
@@ -92,12 +70,10 @@ function App() {
     if (tab === 'Performa') {
       setSelectedCustomerName('');
       localStorage.removeItem('simba_active_customer');
-      localStorage.removeItem('dheeksha_active_customer');
     }
     if (tab === 'Particulars') {
       setSelectedCustomerName('');
       localStorage.removeItem('simba_active_customer');
-      localStorage.removeItem('dheeksha_active_customer');
       setParticularInitialSubTab('Select Customer');
       localStorage.setItem('simba_particular_subtab', 'Select Customer');
     }

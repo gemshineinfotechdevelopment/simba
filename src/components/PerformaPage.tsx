@@ -101,7 +101,6 @@ export const PerformaPage: FC<PerformaPageProps> = ({
     return (
       initialSubTab ||
       (localStorage.getItem('simba_performa_subtab') as PerformaSubTab) ||
-      (localStorage.getItem('dheeksha_performa_subtab') as PerformaSubTab) ||
       'Create Performa'
     );
   });

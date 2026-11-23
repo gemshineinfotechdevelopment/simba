@@ -20,7 +20,7 @@ import performaRoutes from './routes/performaRoutes';
 import { seedDefaultAdmin } from './controllers/authController';
 
 const app: Application = express();
-const PORT = process.env.PORT || 5004;
+const PORT = process.env.PORT || 5034;
 
 // Connect Database & Seed default admin
 connectDB().then(() => {
