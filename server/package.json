@@ -7,7 +7,8 @@
     "dev": "ts-node-dev --respawn --transpile-only index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "seed": "ts-node-dev --transpile-only seedData.ts"
+    "seed": "node dist/seedData.js",
+    "seed:ts": "ts-node-dev --transpile-only seedData.ts"
   },
   "keywords": [
     "express",
