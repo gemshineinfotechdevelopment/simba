@@ -12,7 +12,7 @@ export const connectDB = async (retryCount = 0): Promise<void> => {
   let uri =
     process.env.MONGODB_URI ||
     process.env.MONGO_URI ||
-    'mongodb+srv://heamanthprabhu59_db_user:Heamanth007@cluster0.txhuc3s.mongodb.net/simba?retryWrites=true&w=majority&appName=Cluster0';
+    'mongodb://127.0.0.1:27017/simba';
 
   // Strip accidental angle brackets from Atlas connection strings if present
   if (uri.includes('<') && uri.includes('>')) {
