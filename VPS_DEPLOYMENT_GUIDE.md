@@ -144,11 +144,11 @@ From the root directory `/var/www/simba`:
 ```bash
 cd /var/www/simba
 
-# Install Frontend & Backend Dependencies
-npm install
-npm --prefix server install
+# Install Frontend & Backend Dependencies (with dev tools for building)
+npm install --include=dev
+npm --prefix server install --include=dev
 
-# Build both React Vite and Backend TypeScript
+# Build both React Vite and Backend TypeScript (Generates dist/ and server/dist/)
 npm run build:all
 ```
 

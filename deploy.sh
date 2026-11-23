@@ -10,10 +10,10 @@ echo "🚀 [1/5] Pulling latest changes from Git..."
 git pull origin main
 
 echo "📦 [2/5] Installing root & client dependencies..."
-npm install
+npm install --include=dev
 
 echo "📦 [3/5] Installing backend dependencies..."
-npm --prefix server install
+npm --prefix server install --include=dev
 
 echo "🔨 [4/5] Building client & backend..."
 npm run build:all
