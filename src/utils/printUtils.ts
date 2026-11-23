@@ -121,7 +121,6 @@ export const generateBillHtml = (bill: BillPrintData): string => {
     ? bill.caseCount
     : (bill.products || []).reduce((acc, p) => acc + (parseFloat(String(p.quantity)) || 0), 0);
 
-  const preparedBy = bill.preparedBy || 'S.Nagaraj';
   const transportName = bill.transport && bill.transport.trim() !== '' && bill.transport !== '-' ? bill.transport.trim() : '-';
   const receiptSrc = bill.pdfData || bill.pdfUrl || '';
 
@@ -348,7 +347,6 @@ export const generateBillHtml = (bill: BillPrintData): string => {
   <div class="bill-wrapper">
     <!-- Header -->
     <div class="top-header">
-      <div class="signatory">Prepared By: <b>${preparedBy}</b></div>
       <div class="comp-name">Simba</div>
       <div class="comp-sub">Wholesale & Retail Trading • Sivakasi</div>
       <div><span class="doc-type-badge">ESTIMATE / PARTICULAR BILL</span></div>
@@ -2032,7 +2030,6 @@ export const generatePerformaHtml = (performa: any): string => {
       </head>
       <body>
         <div style="position: relative; text-align: center; border-bottom: 2px solid #0F172A; padding-bottom: 8px; margin-bottom: 10px;">
-          <div style="position: absolute; right: 0; top: 0; font-size: 12px; font-weight: 700; color: #475569;">Prepared By: <b>${performa.preparedBy || 'S.Nagaraj'}</b></div>
           <h1 style="font-size: 26px; font-weight: 900; color: #0B4DB7; margin: 0 0 2px 0; text-transform: uppercase;">Simba</h1>
           <div style="font-size: 11px; font-weight: 700; color: #475569; text-transform: uppercase;">Wholesale & Retail Trading • Sivakasi</div>
         </div>

@@ -104,7 +104,6 @@ export const BillPrintTemplate: React.FC<BillPrintTemplateProps> = ({ bill }) =>
     ? bill.caseCount
     : (bill.products || []).reduce((acc, p) => acc + (parseFloat(String(p.quantity)) || 0), 0);
 
-  const preparedBy = bill.preparedBy || 'S.Nagaraj';
   const transportName = bill.transport && bill.transport.trim() !== '' && bill.transport !== '-' ? bill.transport.trim() : '-';
 
   // Check for uploaded Lorry / Godown receipt (pdfData or pdfUrl)
@@ -126,18 +125,6 @@ export const BillPrintTemplate: React.FC<BillPrintTemplateProps> = ({ bill }) =>
     >
       {/* Top Header */}
       <div style={{ position: 'relative', textAlign: 'center', borderBottom: '2px solid #0F172A', paddingBottom: '8px', marginBottom: '12px' }}>
-        <div
-          style={{
-            position: 'absolute',
-            right: 0,
-            top: 0,
-            fontSize: '12px',
-            fontWeight: 700,
-            color: '#475569',
-          }}
-        >
-          Prepared By: <b>{preparedBy}</b>
-        </div>
         <h1
           style={{
             fontSize: '26px',

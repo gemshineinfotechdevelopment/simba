@@ -63,7 +63,6 @@ interface PerformaPrintTemplateProps {
 }
 
 export const PerformaPrintTemplate: React.FC<PerformaPrintTemplateProps> = ({ performa }) => {
-  const preparedBy = performa.preparedBy || 'S.Nagaraj';
   const customer = performa.customerSnapshot || { name: 'Customer' };
 
   const formatCurrency = (val: number | undefined) => {
@@ -151,18 +150,6 @@ export const PerformaPrintTemplate: React.FC<PerformaPrintTemplateProps> = ({ pe
     >
       {/* Top Header */}
       <div style={{ position: 'relative', textAlign: 'center', marginBottom: '14px' }}>
-        <div
-          style={{
-            position: 'absolute',
-            right: 0,
-            top: 0,
-            fontSize: '13px',
-            fontWeight: 600,
-            color: '#000000',
-          }}
-        >
-          {preparedBy}
-        </div>
         <h1
           style={{
             fontSize: '28px',
