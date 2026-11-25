@@ -1,4 +1,5 @@
 import type { BillPrintData } from '../components/BillPrintTemplate';
+import { calculateBillCharges } from './chargeUtils';
 
 /**
  * Robust date parser supporting DD-MM-YYYY, YYYY-MM-DD, DD/MM/YYYY, ISO, etc.
@@ -59,57 +60,35 @@ export const generateBillHtml = (bill: BillPrintData): string => {
   }, 0);
   const subtotal = prodSubtotal > 0 ? prodSubtotal : (parseFloat(String(bill.amount || bill.total || '0').replace(/,/g, '')) || 0);
 
-  // Discount calculation
-  const rawDiscStr = String(bill.discount ?? '').trim();
-  const cleanDisc = rawDiscStr.replace(/[^0-9.]/g, '');
-  const discNum = parseFloat(cleanDisc) || 0;
-  let discountAmt = 0;
-  let discountLabel = 'Discount Amount';
-  if (discNum > 0) {
-    const isDiscFlat = rawDiscStr.startsWith('₹') || rawDiscStr.toLowerCase().includes('rs');
-    if (rawDiscStr.includes('%') || (!isDiscFlat && discNum <= 100)) {
-      discountAmt = (subtotal * discNum) / 100;
-      discountLabel = `Discount (${cleanDisc}%)`;
-    } else {
-      discountAmt = discNum;
-      discountLabel = `Discount (₹${discNum.toLocaleString('en-IN')})`;
-    }
-  } else {
-    discountLabel = 'Discount Amount';
-  }
+  const {
+    discountParsed,
+    packingParsed,
+    taxParsed,
+    discountAmt,
+    packingAmt,
+    taxAmt,
+  } = calculateBillCharges(bill, subtotal);
 
-  const baseAfterDiscount = Math.max(0, subtotal - discountAmt);
+  const discountLabel =
+    discountParsed.num > 0
+      ? discountParsed.isPercent
+        ? `Discount (${discountParsed.cleanNum}%)`
+        : `Discount (₹${discountParsed.num.toLocaleString('en-IN')})`
+      : 'Discount Amount';
 
-  // Packing calculation (Calculated from reduced amount after discount or flat)
-  const rawPackStr = String(bill.packing ?? '').trim();
-  const cleanPack = rawPackStr.replace(/[^0-9.]/g, '');
-  const packNum = parseFloat(cleanPack) || 0;
-  let packingAmt = 0;
-  let packingLabel = 'Packing Charges';
-  if (packNum > 0) {
-    const isPackFlat = rawPackStr.startsWith('₹') || rawPackStr.toLowerCase().includes('rs');
-    if (rawPackStr.includes('%') || (!isPackFlat && packNum <= 100)) {
-      packingAmt = (baseAfterDiscount * packNum) / 100;
-      packingLabel = `Packing (${cleanPack}%)`;
-    } else {
-      packingAmt = packNum;
-      packingLabel = `Packing (₹${packNum.toLocaleString('en-IN')})`;
-    }
-  } else {
-    packingLabel = 'Packing Charges';
-  }
+  const packingLabel =
+    packingParsed.num > 0
+      ? packingParsed.isPercent
+        ? `Packing (${packingParsed.cleanNum}%)`
+        : `Packing (₹${packingParsed.num.toLocaleString('en-IN')})`
+      : 'Packing Charges';
 
-  // Tax calculation (Manual flat amount)
-  const rawTaxStr = String(bill.tax ?? '').trim().replace(/[^0-9.]/g, '');
-  const taxNum = parseFloat(rawTaxStr) || 0;
-  let taxAmt = 0;
-  let taxLabel = 'Tax Amount';
-  if (taxNum > 0) {
-    taxAmt = taxNum;
-    taxLabel = `Tax Amount (₹${taxNum.toLocaleString('en-IN')})`;
-  } else {
-    taxLabel = 'Tax Amount';
-  }
+  const taxLabel =
+    taxParsed.num > 0
+      ? taxParsed.isPercent
+        ? `Tax (${taxParsed.cleanNum}%)`
+        : `Tax Amount (₹${taxParsed.num.toLocaleString('en-IN')})`
+      : 'Tax Amount';
 
   // Grand Total calculation
   const calculatedTotal = Math.max(0, subtotal - discountAmt + packingAmt + taxAmt);
@@ -131,6 +110,7 @@ export const generateBillHtml = (bill: BillPrintData): string => {
       <tr style="background-color: ${isEven ? '#F8FAFC' : '#FFFFFF'};">
         <td style="border: 1px solid #CBD5E1; padding: 7px 8px; text-align: center; color: #475569; font-weight: 600;">${idx + 1}</td>
         <td style="border: 1px solid #CBD5E1; padding: 7px 10px; text-align: left; font-weight: 700; color: #0F172A;">${item.particular || '-'}</td>
+        <td style="border: 1px solid #CBD5E1; padding: 7px 8px; text-align: center; color: #475569; font-weight: 600;">${item.measurement && item.measurement.trim() ? item.measurement : '-'}</td>
         <td style="border: 1px solid #CBD5E1; padding: 7px 8px; text-align: center; font-weight: 700; color: #0F172A;">${item.quantity || '-'}</td>
         <td style="border: 1px solid #CBD5E1; padding: 7px 8px; text-align: right; color: #334155;">₹ ${(parseFloat(String(item.rate)) || 0).toFixed(2)}</td>
         <td style="border: 1px solid #CBD5E1; padding: 7px 8px; text-align: center; color: #64748B;">${item.pktUnit && item.pktUnit !== '-' ? item.pktUnit : '-'}</td>
@@ -373,14 +353,15 @@ export const generateBillHtml = (bill: BillPrintData): string => {
         <tr>
           <th style="width: 40px; text-align: center;">#</th>
           <th style="text-align: left;">Particular / Product Description</th>
-          <th style="width: 75px; text-align: center;">Cases</th>
+          <th style="width: 75px; text-align: center;">Meas.</th>
+          <th style="width: 70px; text-align: center;">Cases</th>
           <th style="width: 85px; text-align: right;">Rate (₹)</th>
-          <th style="width: 80px; text-align: center;">Pkt / Unit</th>
-          <th style="width: 110px; text-align: right;">Amount (₹)</th>
+          <th style="width: 75px; text-align: center;">Pkt / Unit</th>
+          <th style="width: 105px; text-align: right;">Amount (₹)</th>
         </tr>
       </thead>
       <tbody>
-        ${productRowsHtml || '<tr><td colspan="6" style="text-align:center; padding:16px; color:#64748B;">No product items attached.</td></tr>'}
+        ${productRowsHtml || '<tr><td colspan="7" style="text-align:center; padding:16px; color:#64748B;">No product items attached.</td></tr>'}
       </tbody>
     </table>
 
@@ -977,7 +958,8 @@ export const generateLedgerStatementHtml = (
       const cred = parseFloat(String(entry.credit || '0').replace(/,/g, '')) || 0;
       const isEven = localIdx % 2 === 1;
 
-      const desc = entry.billNo ? `Bill #${entry.billNo}` : entry.type || 'PAYMENT / RECEIPT';
+      const modeSuffix = entry.type !== 'BILL' && entry.paymentMode ? ` (${entry.paymentMode})` : '';
+      const desc = entry.billNo ? `Bill #${entry.billNo}` : `${entry.type || 'PAYMENT / RECEIPT'}${modeSuffix}`;
 
       return `
         <tr class="data-row" style="background-color: ${isEven ? '#F8FAFC' : '#FFFFFF'};">
@@ -1844,12 +1826,23 @@ export const generateProductsListPrintHtml = (products: any[]): string => {
   const currentDate = new Date().toLocaleDateString('en-GB').replace(/\//g, '-');
   const rowsHtml = products.map((p, idx) => {
     const isEven = idx % 2 === 1;
+    const amt = p.amount ?? (p.rate && Number(p.rate) > 0 ? p.rate : null);
+    const formattedAmount =
+      amt !== null && amt !== undefined && Number.isFinite(Number(amt))
+        ? `₹ ${Number(amt).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+        : '-';
+    const gstText =
+      p.gstPercent !== null && p.gstPercent !== undefined && p.gstPercent !== ''
+        ? `${p.gstPercent}%`
+        : '-';
     return `
     <tr style="background-color: ${isEven ? '#F8FAFC' : '#FFFFFF'};">
-      <td class="text-center" style="width:40px; border: 1px solid #CBD5E1; padding: 6px;">${idx + 1}</td>
+      <td class="text-center" style="width:40px; border: 1px solid #CBD5E1; padding: 6px;">${p.slNo || idx + 1}</td>
       <td style="font-weight:700; color:#0F172A; border: 1px solid #CBD5E1; padding: 6px 8px;">${p.name}</td>
-      <td class="text-center" style="color:#64748B; border: 1px solid #CBD5E1; padding: 6px;">${p.hsnCode || '-'}</td>
-      <td style="text-align:right; font-weight:700; color:#0B4DB7; border: 1px solid #CBD5E1; padding: 6px 8px;">₹ ${(parseFloat(p.rate) || 0).toFixed(2)}</td>
+      <td class="text-center" style="color:#475569; border: 1px solid #CBD5E1; padding: 6px;">${p.hsnCode || '-'}</td>
+      <td class="text-center" style="color:#475569; border: 1px solid #CBD5E1; padding: 6px;">${p.measurement || '-'}</td>
+      <td class="text-center" style="color:#475569; border: 1px solid #CBD5E1; padding: 6px;">${gstText}</td>
+      <td style="text-align:right; font-weight:700; color:#0B4DB7; border: 1px solid #CBD5E1; padding: 6px 8px;">${formattedAmount}</td>
     </tr>
   `;
   }).join('');
@@ -1888,11 +1881,13 @@ export const generateProductsListPrintHtml = (products: any[]): string => {
         <th class="text-center">#</th>
         <th>Product Name</th>
         <th class="text-center">HSN Code</th>
-        <th style="text-align:right;">Default Rate</th>
+        <th class="text-center">Measurement</th>
+        <th class="text-center">GST %</th>
+        <th style="text-align:right;">Amount</th>
       </tr>
     </thead>
     <tbody>
-      ${rowsHtml || '<tr><td colspan="4" class="text-center" style="padding:16px;">No products found.</td></tr>'}
+      ${rowsHtml || '<tr><td colspan="6" class="text-center" style="padding:16px;">No products found.</td></tr>'}
     </tbody>
   </table>
 </body>
@@ -1979,6 +1974,7 @@ export const generatePerformaHtml = (performa: any): string => {
     const isEven = idx % 2 === 1;
     const prodName = item.productSnapshot?.productName || item.productName || item.particular || 'Product';
     const prodCode = item.productSnapshot?.productCode || item.productCode || '';
+    const measVal = (item.measurement && String(item.measurement).trim()) || item.productSnapshot?.measurement || '-';
     const compName = (item.companyName && String(item.companyName).trim()) || item.productSnapshot?.companyName || performa.companyName || '';
     const rateVal = parseFloat(String(item.rate || 0)) || 0;
     const allocatedVal = parseFloat(String(item.allocatedAmount || ((parseFloat(item.requiredCases) || 0) * rateVal * (parseFloat(item.pktPerUnit || item.pktUnit) || 1)))) || 0;
@@ -1989,6 +1985,9 @@ export const generatePerformaHtml = (performa: any): string => {
       <td style="padding: 7px 10px; border: 1px solid #CBD5E1;">
         <div style="font-weight: 700; color: #0F172A;">${prodName}</div>
         ${prodCode ? `<div style="font-size: 10.5px; color: #64748B;">Code: ${prodCode}</div>` : ''}
+      </td>
+      <td style="padding: 7px 6px; text-align: center; color: #475569; font-weight: 600; border: 1px solid #CBD5E1;">
+        ${measVal}
       </td>
       <td style="padding: 7px 8px; border: 1px solid #CBD5E1; color: #0B4DB7; font-weight: 600; font-size: 11.5px;">
         ${compName || '-'}
@@ -2060,7 +2059,8 @@ export const generatePerformaHtml = (performa: any): string => {
             <tr>
               <th style="width: 35px; text-align: center;">#</th>
               <th style="text-align: left;">Product Description</th>
-              <th style="width: 110px; text-align: left;">Company</th>
+              <th style="width: 75px; text-align: center;">Meas.</th>
+              <th style="width: 100px; text-align: left;">Company</th>
               <th style="width: 70px; text-align: center;">Total Cases</th>
               <th style="width: 80px; text-align: right;">Rate (₹)</th>
               <th style="width: 55px; text-align: center;">Units</th>
@@ -2068,7 +2068,7 @@ export const generatePerformaHtml = (performa: any): string => {
             </tr>
           </thead>
           <tbody>
-            ${productRowsHtml || '<tr><td colspan="7" style="text-align:center; padding:16px; color:#64748B;">No products allocated.</td></tr>'}
+            ${productRowsHtml || '<tr><td colspan="8" style="text-align:center; padding:16px; color:#64748B;">No products allocated.</td></tr>'}
           </tbody>
         </table>
 

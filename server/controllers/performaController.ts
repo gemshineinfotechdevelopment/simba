@@ -274,6 +274,12 @@ export const createPerforma = async (req: Request, res: Response, next: NextFunc
         caseOut: 0,
         rate: rate,
         pktPerUnit: pktPerUnit,
+        measurement:
+          item.measurement !== undefined
+            ? String(item.measurement).trim()
+            : item.productSnapshot?.measurement
+              ? String(item.productSnapshot.measurement).trim()
+              : '',
         allocatedAmount: allocated,
         usedAmount: 0,
         remainingAmount: allocated,
@@ -444,6 +450,12 @@ export const updatePerforma = async (req: Request, res: Response, next: NextFunc
           caseOut: parseFloat(item.caseOut) || usedCases,
           rate: rate,
           pktPerUnit: pktPerUnit,
+          measurement:
+            item.measurement !== undefined
+              ? String(item.measurement).trim()
+              : item.productSnapshot?.measurement
+                ? String(item.productSnapshot.measurement).trim()
+                : '',
           allocatedAmount: allocated,
           usedAmount: usedAmt,
           remainingAmount: Math.max(0, allocated - usedAmt),

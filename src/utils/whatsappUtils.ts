@@ -8,6 +8,7 @@ import {
   generateCustomerListPrintHtml,
 } from './printUtils';
 import type { BillPrintData } from '../components/BillPrintTemplate';
+import { formatChargeDisplay } from './chargeUtils';
 
 /**
  * Normalizes phone numbers for WhatsApp (adds 91 if 10-digit Indian number)
@@ -191,13 +192,13 @@ export const shareBillOnWhatsApp = async (bill: BillPrintData, phone?: string) =
   const itemsText = (bill.products || [])
     .map(
       (p, i) =>
-        `${i + 1}. *${p.particular}* - ${p.quantity} Cases @ ₹${p.rate}${p.pktUnit && p.pktUnit !== '-' ? ` (${p.pktUnit}/pkt)` : ''} = *₹${p.amount}*`
+        `${i + 1}. *${p.particular}*${p.measurement && p.measurement.trim() ? ` (${p.measurement})` : ''} - ${p.quantity} Cases @ ₹${p.rate}${p.pktUnit && p.pktUnit !== '-' ? ` (${p.pktUnit}/pkt)` : ''} = *₹${p.amount}*`
     )
     .join('\n');
 
-  const rawDisc = parseFloat(String(bill.discount || '0').replace(/[^0-9.]/g, '')) || 0;
-  const rawPack = parseFloat(String(bill.packing || '0').replace(/[^0-9.]/g, '')) || 0;
-  const rawTax = parseFloat(String(bill.tax || '0').replace(/[^0-9.]/g, '')) || 0;
+  const discountText = formatChargeDisplay(bill.discount, '0%');
+  const packingText = formatChargeDisplay(bill.packing, '0%');
+  const taxText = formatChargeDisplay(bill.tax, '0.00');
 
   const text = `*SIMBA - INVOICE BILL* 🧾
 ----------------------------------------
@@ -211,9 +212,9 @@ ${bill.companyName && bill.companyName !== 'General' ? `*Company:* ${bill.compan
 ${itemsText || '-'}
 ----------------------------------------
 *Subtotal:* ₹${bill.amount || '0.00'}
-*Discount:* ${rawDisc > 0 ? `${bill.discount}${String(bill.discount).includes('%') ? '' : '%'}` : '0%'}
-*Packing:* ${rawPack > 0 ? `${bill.packing}${String(bill.packing).includes('%') ? '' : '%'}` : '0%'}
-*Tax:* ₹${rawTax > 0 ? rawTax.toLocaleString('en-IN') : '0.00'}
+*Discount:* ${discountText}
+*Packing:* ${packingText}
+*Tax:* ${taxText}
 *NET TOTAL:* ₹${bill.total || '0.00'}
 ----------------------------------------
 _Thank you for your business!_
@@ -349,12 +350,14 @@ export const sharePerformaOnWhatsApp = async (performa: any, phone?: string) => 
   const itemsText = (performa.products || [])
     .map((p: any, i: number) => {
       const pName = p.productSnapshot?.productName || p.productName || 'Product';
+      const pMeas = (p.measurement && String(p.measurement).trim()) || p.productSnapshot?.measurement || '';
+      const measLabel = pMeas ? ` (${pMeas})` : '';
       const compName = p.productSnapshot?.companyName || p.companyName || '';
       const compLabel = compName ? ` [${compName}]` : '';
       const pCases = p.requiredCases || 0;
       const pRate = p.rate || 0;
       const pAlloc = p.allocatedAmount || (Number(pCases) * Number(pRate) * (Number(p.pktPerUnit) || 1));
-      return `${i + 1}. *${pName}*${compLabel} - ${pCases} Cases @ ₹${pRate} = *₹${Number(pAlloc).toLocaleString('en-IN', { minimumFractionDigits: 2 })}*`;
+      return `${i + 1}. *${pName}*${measLabel}${compLabel} - ${pCases} Cases @ ₹${pRate} = *₹${Number(pAlloc).toLocaleString('en-IN', { minimumFractionDigits: 2 })}*`;
     })
     .join('\n');
 

@@ -20,7 +20,7 @@ const getApiBaseUrl = (): string => {
 
   // Safe development fallback: ONLY used during local `vite dev`
   if (import.meta.env.DEV) {
-    return 'http://localhost:5004/api';
+    return 'http://localhost:5034/api';
   }
 
   // In production builds when no environment variable is provided,
@@ -77,6 +77,9 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     return json.data !== undefined ? json.data : json;
   } catch (error) {
     console.error(`[API Error] Request to ${endpoint} failed:`, error);
+    if (error instanceof TypeError) {
+      throw new Error(`Unable to reach backend server (${url}). Make sure the backend server is running.`);
+    }
     throw error;
   }
 }

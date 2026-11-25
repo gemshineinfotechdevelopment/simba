@@ -41,6 +41,18 @@ export const parseDateToTimestamp = (dateStr: string): number => {
   return isNaN(parsed) ? 0 : parsed;
 };
 
+/** Resolves a charge string as % (if explicit '%' or value < 100 without currency prefix) or flat rupees. */
+const resolveChargeAmount = (rawVal: unknown, base: number): number => {
+  const str = String(rawVal || '0').trim();
+  const num = cleanNumber(str);
+  if (num <= 0) return 0;
+  const isFlat = str.startsWith('₹') || str.toLowerCase().includes('rs');
+  if (str.includes('%') || (!isFlat && num < 100)) {
+    return (base * num) / 100;
+  }
+  return num;
+};
+
 export const getParticularNetTotal = (p: any): number => {
   if (!p) return 0;
   const storedTotal = cleanNumber(p.total);
@@ -55,29 +67,11 @@ export const getParticularNetTotal = (p: any): number => {
 
   const subtotal = prodSubtotal > 0 ? prodSubtotal : cleanNumber(p.amount);
 
-  let discountAmt = 0;
-  const discStr = String(p.discount || '0').trim();
-  const discNum = cleanNumber(discStr);
-  const isDiscFlat = discStr.startsWith('₹') || discStr.toLowerCase().includes('rs');
-  if (discStr.includes('%') || (!isDiscFlat && discNum > 0 && discNum <= 100)) {
-    discountAmt = (subtotal * discNum) / 100;
-  } else {
-    discountAmt = discNum;
-  }
-
+  const discountAmt = resolveChargeAmount(p.discount, subtotal);
   const baseAfterDisc = Math.max(0, subtotal - discountAmt);
-
-  let packingAmt = 0;
-  const packStr = String(p.packing || '0').trim();
-  const packNum = cleanNumber(packStr);
-  const isPackFlat = packStr.startsWith('₹') || packStr.toLowerCase().includes('rs');
-  if (packStr.includes('%') || (!isPackFlat && packNum > 0 && packNum <= 100)) {
-    packingAmt = (baseAfterDisc * packNum) / 100;
-  } else {
-    packingAmt = packNum;
-  }
-
-  const taxAmt = cleanNumber(p.tax);
+  const packingAmt = resolveChargeAmount(p.packing, baseAfterDisc);
+  const taxableBase = Math.max(0, baseAfterDisc + packingAmt);
+  const taxAmt = resolveChargeAmount(p.tax, taxableBase);
   const calculatedNet = Math.max(0, subtotal - discountAmt + packingAmt + taxAmt);
 
   if (storedTotal > 0) {

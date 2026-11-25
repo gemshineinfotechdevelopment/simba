@@ -10,6 +10,7 @@ export interface PerformaPrintProduct {
   remainingCases?: number;
   rate: number;
   pktPerUnit: number;
+  measurement?: string;
   allocatedAmount: number;
 }
 
@@ -278,7 +279,8 @@ export const PerformaPrintTemplate: React.FC<PerformaPrintTemplateProps> = ({ pe
           <tr style={{ backgroundColor: '#0F172A', color: '#FFFFFF' }}>
             <th style={{ padding: '8px 6px', textAlign: 'center', width: '35px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', border: '1px solid #0F172A' }}>#</th>
             <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', border: '1px solid #0F172A' }}>Product Description</th>
-            <th style={{ padding: '8px 8px', textAlign: 'left', width: '120px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', border: '1px solid #0F172A' }}>Company</th>
+            <th style={{ padding: '8px 6px', textAlign: 'center', width: '75px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', border: '1px solid #0F172A' }}>Meas.</th>
+            <th style={{ padding: '8px 8px', textAlign: 'left', width: '110px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', border: '1px solid #0F172A' }}>Company</th>
             <th style={{ padding: '8px 6px', textAlign: 'center', width: '75px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', border: '1px solid #0F172A' }}>Total Cases</th>
             <th style={{ padding: '8px 8px', textAlign: 'right', width: '80px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', border: '1px solid #0F172A' }}>Rate (₹)</th>
             <th style={{ padding: '8px 6px', textAlign: 'center', width: '55px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', border: '1px solid #0F172A' }}>Units</th>
@@ -288,7 +290,7 @@ export const PerformaPrintTemplate: React.FC<PerformaPrintTemplateProps> = ({ pe
         <tbody>
           {(performa.products || []).length === 0 ? (
             <tr>
-              <td colSpan={7} style={{ padding: '16px', textAlign: 'center', color: '#64748B', border: '1px solid #CBD5E1' }}>
+              <td colSpan={8} style={{ padding: '16px', textAlign: 'center', color: '#64748B', border: '1px solid #CBD5E1' }}>
                 No products allocated.
               </td>
             </tr>
@@ -303,6 +305,9 @@ export const PerformaPrintTemplate: React.FC<PerformaPrintTemplateProps> = ({ pe
                     {item.productCode && (
                       <div style={{ fontSize: '10.5px', color: '#64748B' }}>Code: {item.productCode}</div>
                     )}
+                  </td>
+                  <td style={{ padding: '7px 6px', textAlign: 'center', color: '#475569', fontWeight: 600, border: '1px solid #CBD5E1' }}>
+                    {(item.measurement && item.measurement.trim()) || (item as any).productSnapshot?.measurement || '-'}
                   </td>
                   <td style={{ padding: '7px 8px', color: '#0B4DB7', fontWeight: 600, border: '1px solid #CBD5E1', fontSize: '11.5px' }}>
                     {(item.companyName && item.companyName.trim()) || (item as any).productSnapshot?.companyName || performa.companyName || '-'}

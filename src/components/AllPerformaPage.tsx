@@ -42,10 +42,12 @@ import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
 import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded';
 import ModeEditOutlineRoundedIcon from '@mui/icons-material/ModeEditOutlineRounded';
 import WhatsAppIcon from '@mui/icons-material/WhatsApp';
-import { PerformasApi, CustomersApi, CompaniesApi, ProductsApi } from '../services/api';
+import { PerformasApi, CustomersApi, CompaniesApi, ProductsApi, ParticularsApi } from '../services/api';
 import { PerformaPrintModal } from './PerformaPrintModal';
 import type { PerformaPrintData } from './PerformaPrintTemplate';
 import { sharePerformaOnWhatsApp, shareAllPerformasOnWhatsApp } from '../utils/whatsappUtils';
+import { extractSavedMeasurements, mergeMeasurementOptions } from '../utils/measurements';
+import { MeasurementInput } from './MeasurementInput';
 
 interface EditProductItem {
   id: string;
@@ -59,6 +61,7 @@ interface EditProductItem {
   remainingCases?: number;
   rate: number | string;
   pktPerUnit: number | string;
+  measurement?: string;
   allocatedAmount: number | string;
 }
 
@@ -122,6 +125,8 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
   const [newRowCases, setNewRowCases] = useState<string>('');
   const [newRowRate, setNewRowRate] = useState<string>('');
   const [newRowPktUnit, setNewRowPktUnit] = useState<string>('1');
+  const [newRowMeasurement, setNewRowMeasurement] = useState<string>('');
+  const [particularMeasurements, setParticularMeasurements] = useState<string[]>([]);
 
   // Toast State
   const [toast, setToast] = useState<{ open: boolean; message: string; severity: 'success' | 'error' | 'info' }>({
@@ -164,12 +169,25 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
       CustomersApi.getAll().catch(() => []),
       CompaniesApi.getAll().catch(() => []),
       ProductsApi.getAll().catch(() => []),
-    ]).then(([custList, compList, prodList]) => {
+      ParticularsApi.getAll().catch(() => []),
+    ]).then(([custList, compList, prodList, partList]) => {
       setCustomers(custList || []);
       setCompanies(compList || []);
       setAvailableProducts(prodList || []);
+      setParticularMeasurements(extractSavedMeasurements(partList || []));
     });
   }, []);
+
+  const measurementOptions = useMemo(
+    () =>
+      mergeMeasurementOptions([
+        ...availableProducts.map((p: any) => p.measurement),
+        ...extractSavedMeasurements(performas),
+        ...particularMeasurements,
+        ...editProducts.map((p) => p.measurement),
+      ]),
+    [availableProducts, performas, particularMeasurements, editProducts]
+  );
 
   useEffect(() => {
     fetchPerformas();
@@ -267,6 +285,7 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
         remainingCases: p.remainingCases,
         rate: p.rate,
         pktPerUnit: p.pktPerUnit || 1,
+        measurement: p.measurement || p.productSnapshot?.measurement || '',
         allocatedAmount: p.allocatedAmount,
       })),
       totalRequiredCases: fullPerforma.totalRequiredCases,
@@ -324,6 +343,7 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
         remainingCases: p.remainingCases || p.requiredCases || 0,
         rate: p.rate || 0,
         pktPerUnit: p.pktPerUnit || 1,
+        measurement: p.measurement || p.productSnapshot?.measurement || '',
         allocatedAmount: p.allocatedAmount || (p.requiredCases || 0) * (p.rate || 0) * (p.pktPerUnit || 1),
       }));
 
@@ -337,7 +357,11 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
   };
 
   // Edit Modal Product Row actions
-  const handleEditProductChange = (id: string, field: 'requiredCases' | 'rate' | 'pktPerUnit' | 'companyName' | 'productName', val: string) => {
+  const handleEditProductChange = (
+    id: string,
+    field: 'requiredCases' | 'rate' | 'pktPerUnit' | 'companyName' | 'productName' | 'measurement',
+    val: string
+  ) => {
     setEditProducts((prev) =>
       prev.map((item) => {
         if (item.id !== id) return item;
@@ -386,6 +410,7 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
       remainingCases: casesVal,
       rate: rateVal,
       pktPerUnit: unitsVal,
+      measurement: newRowMeasurement.trim(),
       allocatedAmount: allocatedAmt,
     };
 
@@ -398,6 +423,7 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
     setNewRowCases('');
     setNewRowRate('');
     setNewRowPktUnit('1');
+    setNewRowMeasurement('');
   };
 
   // Edit Aggregates
@@ -508,6 +534,7 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
           usedCases: p.usedCases || 0,
           rate: parseFloat(String(p.rate)) || 0,
           pktPerUnit: parseFloat(String(p.pktPerUnit)) || 1,
+          measurement: p.measurement || '',
           allocatedAmount: parseFloat(String(p.allocatedAmount)) || 0,
         })),
       };
@@ -1153,6 +1180,7 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
                   <TableHead sx={{ backgroundColor: '#F1F5F9' }}>
                     <TableRow>
                       <TableCell sx={{ fontWeight: 800 }}>Product</TableCell>
+                      <TableCell sx={{ fontWeight: 800, textAlign: 'center' }}>Measurement</TableCell>
                       <TableCell sx={{ fontWeight: 800, textAlign: 'center' }}>Total Cases</TableCell>
                       <TableCell sx={{ fontWeight: 800, textAlign: 'right' }}>Rate (₹)</TableCell>
                       <TableCell sx={{ fontWeight: 800, textAlign: 'right' }}>Allocated Value</TableCell>
@@ -1166,6 +1194,9 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
                           {prod.productSnapshot?.productCode && (
                             <div style={{ fontSize: '11px', color: '#64748B' }}>Code: {prod.productSnapshot.productCode}</div>
                           )}
+                        </TableCell>
+                        <TableCell sx={{ textAlign: 'center', fontWeight: 600, color: '#475569' }}>
+                          {prod.measurement || prod.productSnapshot?.measurement || '-'}
                         </TableCell>
                         <TableCell sx={{ textAlign: 'center', fontWeight: 800, color: '#0F172A' }}>{prod.requiredCases}</TableCell>
                         <TableCell sx={{ textAlign: 'right' }}>₹{prod.rate?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</TableCell>
@@ -1495,7 +1526,7 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
                 <Box
                   sx={{
                     display: 'grid',
-                    gridTemplateColumns: { xs: '1fr', sm: '1.5fr 1fr 1fr 1fr 0.8fr auto' },
+                    gridTemplateColumns: { xs: '1fr', sm: '1.4fr 1.1fr 1fr 0.85fr 0.85fr 0.7fr auto' },
                     gap: 1.5,
                     alignItems: 'center',
                     backgroundColor: '#F8FAFC',
@@ -1518,13 +1549,26 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
                         setNewRowProductName(val.name || '');
                         setNewRowProductCode(val.code || val.idCode || '');
                         setNewRowProductCompany(val.companyName || editCompanyName || '');
-                        setNewRowRate(val.rate ? String(val.rate) : '');
+                        const defaultRate = val.amount ?? val.rate;
+                        setNewRowRate(defaultRate !== undefined && defaultRate !== null && Number(defaultRate) > 0 ? String(defaultRate) : '');
                         setNewRowPktUnit(val.pktUnit ? String(val.pktUnit) : '1');
+                        setNewRowMeasurement(val.measurement ? String(val.measurement) : '');
                       }
                     }}
                     renderInput={(params) => (
                       <TextField {...params} label="Add Product" placeholder="Select product..." size="small" />
                     )}
+                  />
+
+                  <MeasurementInput
+                    label="Measurement"
+                    value={newRowMeasurement}
+                    onChange={setNewRowMeasurement}
+                    options={measurementOptions}
+                    placeholder="e.g. drum, kg"
+                    height="40px"
+                    borderRadius="8px"
+                    fontSize="13.5px"
                   />
 
                   <Autocomplete
@@ -1581,6 +1625,7 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
                     <TableHead sx={{ backgroundColor: '#F8FAFC' }}>
                       <TableRow>
                         <TableCell sx={{ fontWeight: 800 }}>Product Name & Code</TableCell>
+                        <TableCell sx={{ fontWeight: 800, width: '130px' }}>Measurement</TableCell>
                         <TableCell sx={{ fontWeight: 800 }}>Company / Brand</TableCell>
                         <TableCell sx={{ fontWeight: 800, width: '130px' }}>Req Cases</TableCell>
                         <TableCell sx={{ fontWeight: 800, width: '130px' }}>Rate (₹)</TableCell>
@@ -1592,7 +1637,7 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
                     <TableBody>
                       {editProducts.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={7} sx={{ textAlign: 'center', py: 3, color: '#94A3B8' }}>
+                          <TableCell colSpan={8} sx={{ textAlign: 'center', py: 3, color: '#94A3B8' }}>
                             No products added to this performa.
                           </TableCell>
                         </TableRow>
@@ -1602,6 +1647,18 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
                             <TableCell>
                               <Typography sx={{ fontWeight: 700, fontSize: '13px' }}>{p.productName}</Typography>
                               <Typography sx={{ fontSize: '11px', color: '#64748B' }}>{p.productCode}</Typography>
+                            </TableCell>
+                            <TableCell>
+                              <MeasurementInput
+                                value={p.measurement || ''}
+                                onChange={(val) => handleEditProductChange(p.id, 'measurement', val)}
+                                options={measurementOptions}
+                                placeholder="e.g. drum"
+                                height="36px"
+                                borderRadius="6px"
+                                fontSize="13px"
+                                sx={{ width: '120px' }}
+                              />
                             </TableCell>
                             <TableCell>
                               <TextField

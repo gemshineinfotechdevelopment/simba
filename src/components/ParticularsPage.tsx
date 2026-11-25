@@ -24,6 +24,7 @@ import {
   Alert,
 } from '@mui/material';
 import AddRoundedIcon from '@mui/icons-material/AddRounded';
+import RemoveRoundedIcon from '@mui/icons-material/RemoveRounded';
 import PrintOutlinedIcon from '@mui/icons-material/PrintOutlined';
 import DeleteOutlineRoundedIcon from '@mui/icons-material/DeleteOutlineRounded';
 import ModeEditOutlineRoundedIcon from '@mui/icons-material/ModeEditOutlineRounded';
@@ -43,6 +44,7 @@ import {
   ProductsApi,
   ParticularsApi,
   AccountsApi,
+  PerformasApi,
 } from '../services/api';
 import { BillPrintModal } from './BillPrintModal';
 import type { BillPrintData } from './BillPrintTemplate';
@@ -54,6 +56,9 @@ import {
 } from '../utils/whatsappUtils';
 import { DateRangePrintModal } from './DateRangePrintModal';
 import { DatePickerField } from './DatePickerField';
+import { extractSavedMeasurements, mergeMeasurementOptions } from '../utils/measurements';
+import { formatChargeDisplay, parseChargeValue } from '../utils/chargeUtils';
+import { MeasurementInput } from './MeasurementInput';
 
 export type ParticularSubTab =
   | 'Select Customer'
@@ -76,6 +81,7 @@ interface ProductRowItem {
   quantity: string;
   rate: string;
   pktUnit: string;
+  measurement?: string;
   amount: string;
 }
 
@@ -96,7 +102,9 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
   // Live Dropdown options
   const [customerOptions, setCustomerOptions] = useState<{ id: string; name: string }[]>([]);
   const [companyOptions, setCompanyOptions] = useState<{ id: string; name: string }[]>([]);
-  const [productOptions, setProductOptions] = useState<{ id: string; name: string }[]>([]);
+  const [productOptions, setProductOptions] = useState<
+    { id: string; name: string; rate?: number | null; measurement?: string }[]
+  >([]);
 
   // Persistent Selected Customer for Creation & Filter
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
@@ -137,6 +145,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
 
   // Product Entry Form State
   const [selectedProduct, setSelectedProduct] = useState<string>('');
+  const [productMeasurement, setProductMeasurement] = useState<string>('');
   const [quantity, setQuantity] = useState<string>('');
   const [rate, setRate] = useState<string>('');
   const [pkt, setPkt] = useState<string>('');
@@ -144,10 +153,11 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
   const [editingRowId, setEditingRowId] = useState<string | null>(null);
   const [editRowData, setEditRowData] = useState<{
     particular: string;
+    measurement: string;
     quantity: string;
     rate: string;
     pktUnit: string;
-  }>({ particular: '', quantity: '', rate: '', pktUnit: '' });
+  }>({ particular: '', measurement: '', quantity: '', rate: '', pktUnit: '' });
   const [createLoading, setCreateLoading] = useState(false);
 
   // Subtab 3: Account Details State
@@ -160,8 +170,8 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
 
   // Subtab 5: Add Credit Form State
   const [addCreditCustomerName, setAddCreditCustomerName] = useState<string>('');
-  const [addCreditCompanyName, setAddCreditCompanyName] = useState<string>('');
   const [creditAmount, setCreditAmount] = useState<string>('');
+  const [creditPaymentMode, setCreditPaymentMode] = useState<string>('Bank');
   const [creditNotes, setCreditNotes] = useState<string>('Additional customer advance');
   const [creditDate, setCreditDate] = useState<string>(() => {
     const today = new Date();
@@ -191,6 +201,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
     products: Array<{
       id?: string;
       particular: string;
+      measurement?: string;
       quantity: string;
       rate: string;
       pktUnit: string;
@@ -304,7 +315,12 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
         }
 
         if (prodRes && prodRes.length > 0) {
-          const mapped = prodRes.map((p: any) => ({ id: p._id || p.id, name: p.name }));
+          const mapped = prodRes.map((p: any) => ({
+            id: p._id || p.id,
+            name: p.name,
+            rate: p.amount ?? p.rate ?? null,
+            measurement: p.measurement || '',
+          }));
           setProductOptions(mapped);
         }
       } catch (err) {
@@ -413,6 +429,79 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
     setActiveSubTab('Create Particular');
   };
 
+  const [savedBillMeasurements, setSavedBillMeasurements] = useState<string[]>([]);
+  const isProductRowsEmpty = productRows.length === 0;
+
+  useEffect(() => {
+    if (!isProductRowsEmpty) return;
+    let active = true;
+    Promise.all([ParticularsApi.getAll().catch(() => []), PerformasApi.getAll().catch(() => [])])
+      .then(([bills, performasRes]) => {
+        if (!active) return;
+        const performaList = Array.isArray(performasRes) ? performasRes : performasRes?.data || [];
+        setSavedBillMeasurements(
+          extractSavedMeasurements([...(bills || []), ...performaList])
+        );
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [isProductRowsEmpty]);
+
+  const measurementOptions = useMemo(
+    () =>
+      mergeMeasurementOptions([
+        ...productOptions.map((p) => p.measurement),
+        ...savedBillMeasurements,
+        ...productRows.map((r) => r.measurement),
+      ]),
+    [productOptions, savedBillMeasurements, productRows]
+  );
+
+  // Product Entry keyboard flow & focus management
+  const productSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const productMenuOpenRef = useRef(false);
+  const highlightedProductRef = useRef<{
+    id: string;
+    name: string;
+    rate?: number | null;
+    measurement?: string;
+  } | null>(null);
+  const productHighlightReasonRef = useRef<string | null>(null);
+  const productSearchTextRef = useRef('');
+
+  const focusProductSearch = () => {
+    requestAnimationFrame(() => {
+      productSearchInputRef.current?.focus();
+    });
+  };
+
+  const resetProductEntryInputs = () => {
+    setSelectedProduct('');
+    setProductMeasurement('');
+    setQuantity('');
+    setRate('');
+    setPkt('');
+    productMenuOpenRef.current = false;
+    highlightedProductRef.current = null;
+    productHighlightReasonRef.current = null;
+    productSearchTextRef.current = '';
+  };
+
+  const selectProductOption = (
+    val: { id: string; name: string; rate?: number | null; measurement?: string } | null
+  ) => {
+    setSelectedProduct(val ? val.name : '');
+    if (val && val.rate !== undefined && val.rate !== null && Number(val.rate) > 0) {
+      setRate(String(val.rate));
+    }
+    setProductMeasurement(val?.measurement ? String(val.measurement) : '');
+    highlightedProductRef.current = null;
+    productHighlightReasonRef.current = null;
+    productSearchTextRef.current = val ? val.name : '';
+  };
+
   // Subtab 2: Product Line Addition
   const handleAddProductRow = () => {
     if (!selectedProduct || !quantity || !rate) {
@@ -427,16 +516,26 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
     const newRow: ProductRowItem = {
       id: Date.now().toString(),
       particular: selectedProduct,
+      measurement: productMeasurement.trim(),
       quantity,
       rate,
       pktUnit: pkt ? pkt : '-',
       amount: lineAmt,
     };
     setProductRows((prev) => [...prev, newRow]);
-    setSelectedProduct('');
-    setQuantity('');
-    setRate('');
-    setPkt('');
+    resetProductEntryInputs();
+    focusProductSearch();
+  };
+
+  const handleRemoveOrClearProductEntry = () => {
+    if (selectedProduct || productMeasurement || quantity || rate || pkt) {
+      resetProductEntryInputs();
+      focusProductSearch();
+      return;
+    }
+    if (productRows.length > 0) {
+      setProductRows((prev) => prev.slice(0, -1));
+    }
   };
 
   // Start editing a product row
@@ -444,6 +543,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
     setEditingRowId(row.id);
     setEditRowData({
       particular: row.particular,
+      measurement: row.measurement || '',
       quantity: row.quantity,
       rate: row.rate,
       pktUnit: row.pktUnit === '-' ? '' : row.pktUnit,
@@ -467,6 +567,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
           ? {
               ...row,
               particular: editRowData.particular.trim(),
+              measurement: editRowData.measurement.trim(),
               quantity: editRowData.quantity.trim(),
               rate: editRowData.rate.trim(),
               pktUnit: editRowData.pktUnit.trim() !== '' ? editRowData.pktUnit.trim() : '-',
@@ -490,37 +591,22 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
 
   // Discount Calculation (Supports % like 5% or flat rupees like 500)
   const discountVal = useMemo(() => {
-    if (!discount) return 0;
-    const cleanDisc = String(discount).trim();
-    const num = parseFloat(cleanDisc) || 0;
-    if (num <= 0) return 0;
-    if (cleanDisc.endsWith('%') || num <= 100) {
-      return (subtotalAmount * num) / 100;
-    }
-    return num;
+    return parseChargeValue(discount, subtotalAmount).amount;
   }, [discount, subtotalAmount]);
 
   // Packing Calculation (Calculated from reduced amount after discount)
   const packingVal = useMemo(() => {
-    if (!packing) return 0;
-    const cleanPack = String(packing).trim();
-    const num = parseFloat(cleanPack) || 0;
-    if (num <= 0) return 0;
     const baseAfterDiscount = Math.max(0, subtotalAmount - discountVal);
-    if (cleanPack.endsWith('%') || num <= 100) {
-      return (baseAfterDiscount * num) / 100;
-    }
-    return num;
+    return parseChargeValue(packing, baseAfterDiscount).amount;
   }, [packing, subtotalAmount, discountVal]);
 
-  // Tax Calculation (Manual fixed amount directly added)
-  const taxVal = useMemo(() => {
-    if (!tax) return 0;
-    const cleanTax = String(tax).trim().replace(/[^0-9.]/g, '');
-    const num = parseFloat(cleanTax) || 0;
-    if (num <= 0) return 0;
-    return num;
-  }, [tax]);
+  // Tax Calculation (Supports % like 18% on taxable base or flat ₹ amount)
+  const taxBreakdown = useMemo(() => {
+    const taxableBase = Math.max(0, subtotalAmount - discountVal + packingVal);
+    return parseChargeValue(tax, taxableBase);
+  }, [tax, subtotalAmount, discountVal, packingVal]);
+
+  const taxVal = taxBreakdown.amount;
 
   // Final Net Total Amount
   const finalTotalAmount = useMemo(() => {
@@ -574,6 +660,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
         date: date,
         products: productRows.map((p) => ({
           particular: p.particular,
+          measurement: p.measurement || '',
           quantity: p.quantity,
           rate: p.rate,
           pktUnit: p.pktUnit,
@@ -592,6 +679,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
       setBillNo('');
       setCompany('');
       setSelectedProduct('');
+      setProductMeasurement('');
       setProductRows([]);
       setCaseCount('0');
       setDiscount('');
@@ -626,16 +714,16 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
       setCreditLoading(true);
       const res = await AccountsApi.addCredit({
         customerName: targetCust,
-        companyName: addCreditCompanyName ? addCreditCompanyName.trim() : '',
         creditAmount: creditAmount.trim(),
         date: creditDate,
-        paymentMode: 'Bank',
+        paymentMode: creditPaymentMode.trim() || 'Bank',
         reference: '',
         notes: creditNotes.trim(),
       });
 
       alert(res?.message || 'Credit added successfully!');
       setCreditAmount('');
+      setCreditPaymentMode('Bank');
       setCreditNotes('Additional customer payment');
       
       // Refresh all financial states
@@ -712,6 +800,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
       caseCount: billData.caseCount || billData.cases || (billData.products ? billData.products.reduce((acc: number, p: any) => acc + (parseFloat(p.quantity) || 0), 0) : 0),
       products: (billData.products || []).map((p: any) => ({
         particular: p.particular || p.particularName || p.name || '',
+        measurement: p.measurement || '',
         quantity: p.quantity || '',
         rate: p.rate || '',
         pktUnit: p.pktUnit || p.pkt || '',
@@ -804,6 +893,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
       products: (row.products || []).map((p: any, idx: number) => ({
         id: p._id || p.id || `edit-prod-${idx}`,
         particular: p.particular || p.particularName || p.name || '',
+        measurement: p.measurement || '',
         quantity: String(p.quantity || '0'),
         rate: String(p.rate || '0'),
         pktUnit: p.pktUnit || p.pkt || '-',
@@ -820,6 +910,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
         {
           id: `edit-prod-${Date.now()}`,
           particular: productOptions[0]?.name || '',
+          measurement: productOptions[0]?.measurement || '',
           quantity: '1',
           rate: '0',
           pktUnit: '-',
@@ -863,32 +954,18 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
   }, [editBillForm.products]);
 
   const editDiscountVal = useMemo(() => {
-    const dStr = String(editBillForm.discount || '').trim();
-    if (!dStr) return 0;
-    const cleanDisc = dStr.replace(/[^0-9.]/g, '');
-    const dNum = parseFloat(cleanDisc) || 0;
-    if (dNum <= 0) return 0;
-    return dStr.includes('%') || dNum <= 100 ? (editSubtotal * dNum) / 100 : dNum;
+    return parseChargeValue(editBillForm.discount, editSubtotal).amount;
   }, [editSubtotal, editBillForm.discount]);
 
   const editPackingVal = useMemo(() => {
-    const pStr = String(editBillForm.packing || '').trim();
-    if (!pStr) return 0;
-    const cleanPack = pStr.replace(/[^0-9.]/g, '');
-    const pNum = parseFloat(cleanPack) || 0;
-    if (pNum <= 0) return 0;
     const baseAfterDiscount = Math.max(0, editSubtotal - editDiscountVal);
-    return pStr.includes('%') || pNum <= 100 ? (baseAfterDiscount * pNum) / 100 : pNum;
+    return parseChargeValue(editBillForm.packing, baseAfterDiscount).amount;
   }, [editSubtotal, editDiscountVal, editBillForm.packing]);
 
   const editTaxVal = useMemo(() => {
-    const tStr = String(editBillForm.tax || '').trim();
-    if (!tStr) return 0;
-    const cleanTax = tStr.replace(/[^0-9.]/g, '');
-    const tNum = parseFloat(cleanTax) || 0;
-    if (tNum <= 0) return 0;
-    return tNum;
-  }, [editBillForm.tax]);
+    const taxableBase = Math.max(0, editSubtotal - editDiscountVal + editPackingVal);
+    return parseChargeValue(editBillForm.tax, taxableBase).amount;
+  }, [editSubtotal, editDiscountVal, editPackingVal, editBillForm.tax]);
 
   const editFinalTotal = useMemo(() => {
     const net = Math.max(0, editSubtotal - editDiscountVal + editPackingVal + editTaxVal);
@@ -1302,7 +1379,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
           <Paper
             elevation={0}
             sx={{
-              width: { xs: '100%', lg: '360px', xl: '380px' },
+              width: { xs: '100%', lg: '310px', xl: '330px' },
               flexShrink: 0,
               backgroundColor: '#FFFFFF',
               borderRadius: '8px',
@@ -1312,7 +1389,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
           >
             <Box
               sx={{
-                backgroundColor: '#0B4DB7',
+                background: 'linear-gradient(90deg, #0B4DB7 0%, #0EA5E9 100%)',
                 px: 2.2,
                 py: 1.4,
                 minHeight: '48px',
@@ -1332,354 +1409,130 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
               </Typography>
             </Box>
 
-            <Box sx={{ p: 2, display: 'flex', flexDirection: 'column', gap: 1.6 }}>
-              <Box sx={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 1.5 }}>
-                <Box>
-                  <Typography sx={{ fontSize: '12px', fontWeight: 600, color: '#475569', mb: 0.5 }}>
-                    Customer
-                  </Typography>
-                  <Autocomplete
-                    fullWidth
-                    size="small"
-                    autoHighlight
-                    options={customerOptions}
-                    getOptionLabel={(option) => (typeof option === 'string' ? option : option.name || '')}
-                    isOptionEqualToValue={(option, val) => option.id === val.id || option.name === val.name}
-                    value={customerOptions.find((c) => c.name === currentCustomerName) || null}
-                    onChange={(_, val) => {
-                      const name = val ? val.name : '';
-                      setCurrentCustomerName(name);
-                      localStorage.setItem('simba_active_customer', name);
-                      if (val) {
-                        setSelectedCustomerId(val.id);
-                        setFilterCustomer(val.name);
-                        setAddCreditCustomerName(val.name);
-                      } else {
-                        setSelectedCustomerId('');
-                      }
-                    }}
-                    renderInput={(params) => (
-                      <TextField
-                        {...params}
-                        placeholder="Search Customer..."
-                        sx={{
-                          backgroundColor: '#FFFFFF',
+            <Box sx={{ p: 2.2, display: 'flex', flexDirection: 'column', gap: 1.8 }}>
+              {/* Date * */}
+              <Box>
+                <Typography sx={{ fontSize: '12px', fontWeight: 600, color: '#475569', mb: 0.6 }}>
+                  Date *
+                </Typography>
+                <DatePickerField
+                  value={date}
+                  onChange={setDate}
+                  placeholder="dd-mm-yyyy"
+                  iconSize={17}
+                  inputSx={{ height: '38px', fontSize: '13px', fontWeight: 600 }}
+                />
+              </Box>
+
+              {/* Customer * */}
+              <Box>
+                <Typography sx={{ fontSize: '12px', fontWeight: 600, color: '#475569', mb: 0.6 }}>
+                  Customer *
+                </Typography>
+                <Autocomplete
+                  fullWidth
+                  size="small"
+                  autoHighlight
+                  options={customerOptions}
+                  getOptionLabel={(option) => (typeof option === 'string' ? option : option.name || '')}
+                  isOptionEqualToValue={(option, val) => option.id === val.id || option.name === val.name}
+                  value={customerOptions.find((c) => c.name === currentCustomerName) || null}
+                  onChange={(_, val) => {
+                    const name = val ? val.name : '';
+                    setCurrentCustomerName(name);
+                    localStorage.setItem('simba_active_customer', name);
+                    if (val) {
+                      setSelectedCustomerId(val.id);
+                      setFilterCustomer(val.name);
+                      setAddCreditCustomerName(val.name);
+                    } else {
+                      setSelectedCustomerId('');
+                    }
+                  }}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      placeholder="Search Customer..."
+                      sx={{
+                        backgroundColor: '#FFFFFF',
+                        borderRadius: '6px',
+                        '& .MuiOutlinedInput-root': {
+                          height: '38px',
                           borderRadius: '6px',
-                          '& .MuiOutlinedInput-root': {
-                            height: '36px',
-                            borderRadius: '6px',
-                            fontSize: '13px',
-                            fontWeight: 600,
-                            color: '#0F172A',
-                            '& fieldset': {
-                              borderColor: '#CBD5E1',
-                            },
-                            '&:hover fieldset': {
-                              borderColor: '#94A3B8',
-                            },
-                            '&.Mui-focused fieldset': {
-                              borderColor: '#0B4DB7',
-                              borderWidth: '1.5px',
-                            },
-                          },
-                        }}
-                      />
-                    )}
-                  />
-                </Box>
-                <Box>
-                  <Typography sx={{ fontSize: '12px', fontWeight: 600, color: '#475569', mb: 0.5 }}>
-                    Case Count
-                  </Typography>
-                  <TextField
-                    fullWidth
-                    size="small"
-                    value={caseCount}
-                    onChange={(e) => setCaseCount(e.target.value)}
-                    slotProps={{
-                      input: {
-                        sx: {
                           fontSize: '13px',
                           fontWeight: 600,
-                          height: '36px',
-                          backgroundColor: '#F8FAFC',
-                          borderRadius: '6px',
                           color: '#0F172A',
-                          '& .MuiOutlinedInput-notchedOutline': {
+                          '& fieldset': {
                             borderColor: '#CBD5E1',
                           },
+                          '&:hover fieldset': {
+                            borderColor: '#94A3B8',
+                          },
+                          '&.Mui-focused fieldset': {
+                            borderColor: '#0B4DB7',
+                            borderWidth: '1.5px',
+                          },
                         },
-                      },
-                    }}
-                  />
-                </Box>
+                      }}
+                    />
+                  )}
+                />
               </Box>
 
-              <Box sx={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 1.5 }}>
-                <Box>
-                  <Typography sx={{ fontSize: '12px', fontWeight: 600, color: '#475569', mb: 0.5 }}>
-                    Company
-                  </Typography>
-                  <Autocomplete
-                    fullWidth
-                    size="small"
-                    autoHighlight
-                    options={companyOptions}
-                    getOptionLabel={(option) => (typeof option === 'string' ? option : option.name || '')}
-                    isOptionEqualToValue={(option, val) => option.id === val.id || option.name === val.name}
-                    value={companyOptions.find((c) => c.name === company) || null}
-                    onChange={(_, val) => setCompany(val ? val.name : '')}
-                    renderInput={(params) => (
-                      <TextField
-                        {...params}
-                        placeholder="Search Company..."
-                        sx={{
-                          backgroundColor: '#FFFFFF',
-                          borderRadius: '6px',
-                          '& .MuiOutlinedInput-root': {
-                            height: '36px',
-                            borderRadius: '6px',
-                            fontSize: '13px',
-                            fontWeight: 500,
-                            color: '#0F172A',
-                            '& fieldset': {
-                              borderColor: '#CBD5E1',
-                            },
-                            '&:hover fieldset': {
-                              borderColor: '#94A3B8',
-                            },
-                            '&.Mui-focused fieldset': {
-                              borderColor: '#0B4DB7',
-                              borderWidth: '1.5px',
-                            },
-                          },
-                        }}
-                      />
-                    )}
-                  />
-                </Box>
-                <Box>
-                  <Typography sx={{ fontSize: '12px', fontWeight: 600, color: '#475569', mb: 0.5 }}>
-                    Discount (%)
-                  </Typography>
-                  <TextField
-                    fullWidth
-                    size="small"
-                    value={discount}
-                    onChange={(e) => setDiscount(e.target.value)}
-                    slotProps={{
-                      input: {
-                        sx: {
-                          fontSize: '13px',
-                          fontWeight: 500,
-                          height: '36px',
-                          backgroundColor: '#FFFFFF',
-                          borderRadius: '6px',
-                          '& .MuiOutlinedInput-notchedOutline': {
-                            borderColor: '#CBD5E1',
-                          },
+              {/* Bill No * */}
+              <Box>
+                <Typography sx={{ fontSize: '12px', fontWeight: 600, color: '#475569', mb: 0.6 }}>
+                  Bill No *
+                </Typography>
+                <TextField
+                  fullWidth
+                  size="small"
+                  placeholder="Enter Bill No (e.g. 101)"
+                  value={billNo}
+                  onChange={(e) => setBillNo(e.target.value)}
+                  slotProps={{
+                    input: {
+                      sx: {
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        height: '38px',
+                        backgroundColor: '#FFFFFF',
+                        borderRadius: '6px',
+                        '& .MuiOutlinedInput-notchedOutline': {
+                          borderColor: '#CBD5E1',
                         },
                       },
-                    }}
-                  />
-                </Box>
+                    },
+                  }}
+                />
               </Box>
 
-              <Box sx={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 1.5 }}>
-                <Box>
-                  <Typography sx={{ fontSize: '12px', fontWeight: 600, color: '#475569', mb: 0.5 }}>
-                    Transport
-                  </Typography>
-                  <TextField
-                    fullWidth
-                    size="small"
-                    value={transport}
-                    onChange={(e) => setTransport(e.target.value)}
-                    slotProps={{
-                      input: {
-                        sx: {
-                          fontSize: '13px',
-                          fontWeight: 500,
-                          height: '36px',
-                          backgroundColor: '#FFFFFF',
-                          borderRadius: '6px',
-                          '& .MuiOutlinedInput-notchedOutline': {
-                            borderColor: '#CBD5E1',
-                          },
+              {/* Transport Name */}
+              <Box>
+                <Typography sx={{ fontSize: '12px', fontWeight: 600, color: '#475569', mb: 0.6 }}>
+                  Transport Name
+                </Typography>
+                <TextField
+                  fullWidth
+                  size="small"
+                  placeholder="Enter Transport Name"
+                  value={transport}
+                  onChange={(e) => setTransport(e.target.value)}
+                  slotProps={{
+                    input: {
+                      sx: {
+                        fontSize: '13px',
+                        fontWeight: 500,
+                        height: '38px',
+                        backgroundColor: '#FFFFFF',
+                        borderRadius: '6px',
+                        '& .MuiOutlinedInput-notchedOutline': {
+                          borderColor: '#CBD5E1',
                         },
                       },
-                    }}
-                  />
-                </Box>
-                <Box>
-                  <Typography sx={{ fontSize: '12px', fontWeight: 600, color: '#475569', mb: 0.5 }}>
-                    Packing (%)
-                  </Typography>
-                  <TextField
-                    fullWidth
-                    size="small"
-                    value={packing}
-                    onChange={(e) => setPacking(e.target.value)}
-                    slotProps={{
-                      input: {
-                        sx: {
-                          fontSize: '13px',
-                          fontWeight: 500,
-                          height: '36px',
-                          backgroundColor: '#FFFFFF',
-                          borderRadius: '6px',
-                          '& .MuiOutlinedInput-notchedOutline': {
-                            borderColor: '#CBD5E1',
-                          },
-                        },
-                      },
-                    }}
-                  />
-                </Box>
-              </Box>
-
-              <Box sx={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 1.5 }}>
-                <Box>
-                  <Typography sx={{ fontSize: '12px', fontWeight: 600, color: '#475569', mb: 0.5 }}>
-                    Bill No *
-                  </Typography>
-                  <TextField
-                    fullWidth
-                    size="small"
-                    placeholder="Enter Bill No (e.g. 101)"
-                    value={billNo}
-                    onChange={(e) => setBillNo(e.target.value)}
-                    slotProps={{
-                      input: {
-                        sx: {
-                          fontSize: '13px',
-                          fontWeight: 600,
-                          height: '36px',
-                          backgroundColor: '#FFFFFF',
-                          borderRadius: '6px',
-                          '& .MuiOutlinedInput-notchedOutline': {
-                            borderColor: '#CBD5E1',
-                          },
-                        },
-                      },
-                    }}
-                  />
-                </Box>
-                <Box>
-                  <Typography sx={{ fontSize: '12px', fontWeight: 600, color: '#475569', mb: 0.5 }}>
-                    Tax (₹)
-                  </Typography>
-                  <TextField
-                    fullWidth
-                    size="small"
-                    placeholder="Enter Tax Amount"
-                    value={tax}
-                    onChange={(e) => setTax(e.target.value)}
-                    slotProps={{
-                      input: {
-                        sx: {
-                          fontSize: '13px',
-                          fontWeight: 500,
-                          height: '36px',
-                          backgroundColor: '#FFFFFF',
-                          borderRadius: '6px',
-                          '& .MuiOutlinedInput-notchedOutline': {
-                            borderColor: '#CBD5E1',
-                          },
-                        },
-                      },
-                    }}
-                  />
-                </Box>
-              </Box>
-
-              <Box
-                sx={{
-                  backgroundColor: '#F8FAFC',
-                  p: 1.4,
-                  borderRadius: '6px',
-                  border: '1px solid #E2E8F0',
-                  display: 'grid',
-                  gridTemplateColumns: '1fr 1fr',
-                  gap: 1.5,
-                }}
-              >
-                <Box>
-                  <Typography sx={{ fontSize: '11.5px', fontWeight: 600, color: '#64748B', mb: 0.5 }}>
-                    Amount
-                  </Typography>
-                  <Box
-                    sx={{
-                      backgroundColor: '#E2E8F0',
-                      borderRadius: '4px',
-                      px: 1.5,
-                      py: 0.7,
-                      fontSize: '13px',
-                      fontWeight: 700,
-                      color: '#0F172A',
-                      textAlign: 'right',
-                    }}
-                  >
-                    {subtotalAmount.toFixed(2)}
-                  </Box>
-                </Box>
-                <Box>
-                  <Typography sx={{ fontSize: '11.5px', fontWeight: 600, color: '#64748B', mb: 0.5 }}>
-                    Total
-                  </Typography>
-                  <Box
-                    sx={{
-                      backgroundColor: '#E2E8F0',
-                      borderRadius: '4px',
-                      px: 1.5,
-                      py: 0.7,
-                      fontSize: '13px',
-                      fontWeight: 700,
-                      color: '#0B4DB7',
-                      textAlign: 'right',
-                    }}
-                  >
-                    {finalTotalAmount}
-                  </Box>
-                </Box>
-              </Box>
-
-              <Box sx={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 1.5, mt: 0.5 }}>
-                <Box>
-                  <Typography sx={{ fontSize: '12px', fontWeight: 600, color: '#475569', mb: 0.5 }}>
-                    Date
-                  </Typography>
-                  <DatePickerField
-                    value={date}
-                    onChange={setDate}
-                    placeholder="dd-mm-yyyy"
-                    iconSize={16}
-                    inputSx={{ height: '36px' }}
-                  />
-                </Box>
-                <Box sx={{ display: 'flex', alignItems: 'flex-end' }}>
-                  <Button
-                    variant="contained"
-                    disableElevation
-                    fullWidth
-                    onClick={handleCreateParticular}
-                    disabled={createLoading}
-                    sx={{
-                      backgroundColor: '#0284C7',
-                      color: '#FFFFFF',
-                      height: '36px',
-                      fontSize: '13px',
-                      fontWeight: 700,
-                      textTransform: 'none',
-                      borderRadius: '6px',
-                      '&:hover': {
-                        backgroundColor: '#0369A1',
-                      },
-                    }}
-                  >
-                    {createLoading ? 'Creating...' : 'Click to Create'}
-                  </Button>
-                </Box>
+                    },
+                  }}
+                />
               </Box>
             </Box>
           </Paper>
@@ -1698,7 +1551,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
           >
             <Box
               sx={{
-                backgroundColor: '#0B4DB7',
+                background: 'linear-gradient(90deg, #0B4DB7 0%, #0EA5E9 100%)',
                 px: 2.2,
                 py: 1.4,
                 minHeight: '48px',
@@ -1725,23 +1578,61 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                 display: 'flex',
                 alignItems: 'center',
                 gap: 1.2,
-                flexWrap: { xs: 'wrap', sm: 'nowrap' },
+                flexWrap: { xs: 'wrap', md: 'nowrap' },
                 borderBottom: '1px solid #E2E8F0',
               }}
             >
               <Autocomplete
                 size="small"
                 autoHighlight
-                sx={{ flex: { xs: '1 1 100%', sm: 2.5 }, minWidth: '160px' }}
+                sx={{ flex: { xs: '1 1 100%', md: 2.5 }, minWidth: '170px' }}
                 options={productOptions}
                 getOptionLabel={(option) => (typeof option === 'string' ? option : option.name || '')}
                 isOptionEqualToValue={(option, val) => option.id === val.id || option.name === val.name}
                 value={productOptions.find((p) => p.name === selectedProduct) || null}
-                onChange={(_, val) => setSelectedProduct(val ? val.name : '')}
+                onOpen={() => {
+                  productMenuOpenRef.current = true;
+                }}
+                onClose={() => {
+                  productMenuOpenRef.current = false;
+                  highlightedProductRef.current = null;
+                  productHighlightReasonRef.current = null;
+                }}
+                onHighlightChange={(_e, option, reason) => {
+                  highlightedProductRef.current = option;
+                  productHighlightReasonRef.current = reason;
+                }}
+                onInputChange={(_e, newInputValue, reason) => {
+                  if (reason === 'input' || reason === 'clear') {
+                    productSearchTextRef.current = newInputValue;
+                  }
+                }}
+                onChange={(_, val) => {
+                  selectProductOption(val);
+                }}
                 renderInput={(params) => (
                   <TextField
                     {...params}
+                    inputRef={productSearchInputRef}
                     placeholder="Search Product..."
+                    onKeyDown={(e) => {
+                      if (e.key === 'Tab' && !e.shiftKey && productMenuOpenRef.current) {
+                        const typedQuery = productSearchTextRef.current.trim().toLowerCase();
+                        const shouldAutoPick =
+                          (typedQuery.length > 0 && typedQuery !== selectedProduct.toLowerCase()) ||
+                          productHighlightReasonRef.current === 'keyboard';
+                        if (shouldAutoPick) {
+                          const target =
+                            highlightedProductRef.current ||
+                            productOptions.find((p) => p.name.toLowerCase().startsWith(typedQuery)) ||
+                            productOptions.find((p) => p.name.toLowerCase().includes(typedQuery)) ||
+                            null;
+                          if (target && target.name !== selectedProduct) {
+                            selectProductOption(target);
+                          }
+                        }
+                      }
+                    }}
                     sx={{
                       backgroundColor: '#FFFFFF',
                       borderRadius: '6px',
@@ -1767,6 +1658,18 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                 )}
               />
 
+              {/* Per-Bill Measurement Override (does not alter fixed Product measurement) */}
+              <MeasurementInput
+                value={productMeasurement}
+                onChange={setProductMeasurement}
+                options={measurementOptions}
+                placeholder="Measurement"
+                height="36px"
+                borderRadius="6px"
+                fontSize="13px"
+                sx={{ flex: { xs: '1 1 45%', md: 1.3 }, minWidth: '140px' }}
+              />
+
               <TextField
                 size="small"
                 placeholder="Case"
@@ -1774,7 +1677,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                 value={quantity}
                 onChange={(e) => setQuantity(e.target.value)}
                 sx={{
-                  flex: { xs: '1 1 45%', sm: 1 },
+                  flex: { xs: '1 1 45%', md: 1 },
                   '& .MuiOutlinedInput-root': {
                     height: '36px',
                     fontSize: '13px',
@@ -1792,7 +1695,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                 value={rate}
                 onChange={(e) => setRate(e.target.value)}
                 sx={{
-                  flex: { xs: '1 1 45%', sm: 1 },
+                  flex: { xs: '1 1 45%', md: 1 },
                   '& .MuiOutlinedInput-root': {
                     height: '36px',
                     fontSize: '13px',
@@ -1810,7 +1713,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                 value={pkt}
                 onChange={(e) => setPkt(e.target.value)}
                 sx={{
-                  flex: { xs: '1 1 45%', sm: 1 },
+                  flex: { xs: '1 1 45%', md: 1 },
                   '& .MuiOutlinedInput-root': {
                     height: '36px',
                     fontSize: '13px',
@@ -1841,29 +1744,62 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                       '& .MuiOutlinedInput-notchedOutline': { borderColor: '#CBD5E1' },
                     },
                   },
-                }}
-                sx={{ flex: { xs: '1 1 45%', sm: 1.2 } }}
-              />
-
-              <Button
-                variant="contained"
-                disableElevation
-                onClick={handleAddProductRow}
-                sx={{
-                  backgroundColor: '#0B4DB7',
-                  color: '#FFFFFF',
-                  minWidth: '36px',
-                  width: '36px',
-                  height: '36px',
-                  p: 0,
-                  borderRadius: '6px',
-                  '&:hover': {
-                    backgroundColor: '#083B8D',
+                  htmlInput: {
+                    tabIndex: -1,
                   },
                 }}
-              >
-                <AddRoundedIcon sx={{ fontSize: 20 }} />
-              </Button>
+                sx={{ flex: { xs: '1 1 45%', md: 1.2 } }}
+              />
+
+              <Tooltip title="Add Product" arrow>
+                <Button
+                  type="button"
+                  variant="contained"
+                  disableElevation
+                  onClick={handleAddProductRow}
+                  sx={{
+                    backgroundColor: '#0B4DB7',
+                    color: '#FFFFFF',
+                    minWidth: '36px',
+                    width: '36px',
+                    height: '36px',
+                    p: 0,
+                    borderRadius: '6px',
+                    '&:hover': {
+                      backgroundColor: '#083B8D',
+                    },
+                    '&:focus-visible': {
+                      outline: '2px solid #0B4DB7',
+                      outlineOffset: '2px',
+                      backgroundColor: '#083B8D',
+                    },
+                  }}
+                >
+                  <AddRoundedIcon sx={{ fontSize: 20 }} />
+                </Button>
+              </Tooltip>
+
+              <Tooltip title="Clear / Remove Last Item" arrow>
+                <Button
+                  variant="contained"
+                  disableElevation
+                  onClick={handleRemoveOrClearProductEntry}
+                  sx={{
+                    backgroundColor: '#EF4444',
+                    color: '#FFFFFF',
+                    minWidth: '36px',
+                    width: '36px',
+                    height: '36px',
+                    p: 0,
+                    borderRadius: '6px',
+                    '&:hover': {
+                      backgroundColor: '#DC2626',
+                    },
+                  }}
+                >
+                  <RemoveRoundedIcon sx={{ fontSize: 20 }} />
+                </Button>
+              </Tooltip>
             </Box>
 
             <TableContainer>
@@ -1881,7 +1817,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                         textAlign: 'center',
                         borderBottom: '1px solid #E2E8F0',
                         borderRight: '1px solid #E2E8F0',
-                        width: '30%',
+                        width: '26%',
                       }}
                     >
                       PARTICULAR
@@ -1897,7 +1833,23 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                         textAlign: 'center',
                         borderBottom: '1px solid #E2E8F0',
                         borderRight: '1px solid #E2E8F0',
-                        width: '14%',
+                        width: '12%',
+                      }}
+                    >
+                      MEASUREMENT
+                    </TableCell>
+                    <TableCell
+                      sx={{
+                        py: 1.4,
+                        px: 1.5,
+                        fontSize: '11.5px',
+                        fontWeight: 700,
+                        color: '#1E293B',
+                        letterSpacing: '0.04em',
+                        textAlign: 'center',
+                        borderBottom: '1px solid #E2E8F0',
+                        borderRight: '1px solid #E2E8F0',
+                        width: '11%',
                       }}
                     >
                       CASE
@@ -1913,7 +1865,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                         textAlign: 'center',
                         borderBottom: '1px solid #E2E8F0',
                         borderRight: '1px solid #E2E8F0',
-                        width: '14%',
+                        width: '12%',
                       }}
                     >
                       RATE
@@ -1929,7 +1881,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                         textAlign: 'center',
                         borderBottom: '1px solid #E2E8F0',
                         borderRight: '1px solid #E2E8F0',
-                        width: '14%',
+                        width: '13%',
                       }}
                     >
                       PKT / UNITS
@@ -1944,7 +1896,8 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                         letterSpacing: '0.04em',
                         textAlign: 'center',
                         borderBottom: '1px solid #E2E8F0',
-                        width: '14%',
+                        borderRight: '1px solid #E2E8F0',
+                        width: '13%',
                       }}
                     >
                       AMOUNT
@@ -1959,7 +1912,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                         letterSpacing: '0.04em',
                         textAlign: 'center',
                         borderBottom: '1px solid #E2E8F0',
-                        width: '14%',
+                        width: '13%',
                       }}
                     >
                       ACTION
@@ -2038,6 +1991,48 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                               />
                             ) : (
                               row.particular
+                            )}
+                          </TableCell>
+
+                          <TableCell
+                            align="center"
+                            sx={{
+                              borderBottom: '1px solid #E2E8F0',
+                              borderRight: '1px solid #E2E8F0',
+                              fontWeight: 600,
+                              fontSize: '13px',
+                              py: isEditing ? 0.8 : 1.2,
+                            }}
+                          >
+                            {isEditing ? (
+                              <MeasurementInput
+                                value={editRowData.measurement}
+                                onChange={(val) =>
+                                  setEditRowData((prev) => ({ ...prev, measurement: val }))
+                                }
+                                options={measurementOptions}
+                                placeholder="e.g. drum"
+                                height="32px"
+                                borderRadius="4px"
+                                fontSize="12.5px"
+                                sx={{ width: '115px', mx: 'auto' }}
+                                onEnterWithClosedMenu={() => handleSaveEditRow(row.id)}
+                              />
+                            ) : row.measurement ? (
+                              <Chip
+                                label={row.measurement}
+                                size="small"
+                                sx={{
+                                  height: '22px',
+                                  fontSize: '11.5px',
+                                  fontWeight: 700,
+                                  backgroundColor: '#EFF6FF',
+                                  color: '#0B4DB7',
+                                  border: '1px solid #DBEAFE',
+                                }}
+                              />
+                            ) : (
+                              '-'
                             )}
                           </TableCell>
 
@@ -2276,6 +2271,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                         <TableCell sx={{ borderBottom: '1px solid #E2E8F0', borderRight: '1px solid #E2E8F0' }} />
                         <TableCell sx={{ borderBottom: '1px solid #E2E8F0', borderRight: '1px solid #E2E8F0' }} />
                         <TableCell sx={{ borderBottom: '1px solid #E2E8F0', borderRight: '1px solid #E2E8F0' }} />
+                        <TableCell sx={{ borderBottom: '1px solid #E2E8F0', borderRight: '1px solid #E2E8F0' }} />
                         <TableCell sx={{ borderBottom: '1px solid #E2E8F0' }} />
                       </TableRow>
                     </>
@@ -2283,6 +2279,250 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                 </TableBody>
               </Table>
             </TableContainer>
+
+            {/* Bottom Summary Footer: Left Pills + Right Totals & Charges Box */}
+            <Box
+              sx={{
+                p: 2.2,
+                display: 'flex',
+                flexDirection: { xs: 'column', md: 'row' },
+                justifyContent: 'space-between',
+                alignItems: { xs: 'stretch', md: 'flex-start' },
+                gap: 2,
+              }}
+            >
+              {/* Left Summary Pills */}
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.2, flexWrap: 'wrap' }}>
+                <Chip
+                  label={`Total Items: ${productRows.length}`}
+                  sx={{
+                    height: '30px',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    color: '#334155',
+                    backgroundColor: '#FFFFFF',
+                    border: '1px solid #CBD5E1',
+                    borderRadius: '16px',
+                  }}
+                />
+                <Chip
+                  label={`Total Cases: ${caseCount || '0'} Cases`}
+                  sx={{
+                    height: '30px',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    color: '#0B4DB7',
+                    backgroundColor: '#EFF6FF',
+                    border: '1px solid #BFDBFE',
+                    borderRadius: '16px',
+                  }}
+                />
+              </Box>
+
+              {/* Right Totals & Charges Card */}
+              <Paper
+                elevation={0}
+                sx={{
+                  width: { xs: '100%', md: '370px' },
+                  p: 2,
+                  borderRadius: '10px',
+                  border: '1px solid #E2E8F0',
+                  backgroundColor: '#FFFFFF',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 1.3,
+                }}
+              >
+                {/* Subtotal */}
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Typography sx={{ fontSize: '13.5px', fontWeight: 700, color: '#0F172A' }}>
+                    Subtotal:
+                  </Typography>
+                  <Typography sx={{ fontSize: '14px', fontWeight: 800, color: '#0F172A' }}>
+                    ₹{subtotalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </Typography>
+                </Box>
+
+                {/* Discount (% or ₹) */}
+                <Box
+                  sx={{
+                    display: 'grid',
+                    gridTemplateColumns: '125px 1fr auto',
+                    alignItems: 'center',
+                    gap: 1.2,
+                  }}
+                >
+                  <Typography sx={{ fontSize: '12.5px', fontWeight: 600, color: '#475569' }}>
+                    Discount (% or ₹):
+                  </Typography>
+                  <TextField
+                    size="small"
+                    placeholder="e.g. 5% or 500"
+                    value={discount}
+                    onChange={(e) => setDiscount(e.target.value)}
+                    slotProps={{
+                      input: {
+                        sx: {
+                          height: '32px',
+                          fontSize: '12.5px',
+                          fontWeight: 500,
+                          borderRadius: '6px',
+                          backgroundColor: '#FFFFFF',
+                        },
+                      },
+                    }}
+                  />
+                  <Typography
+                    sx={{
+                      fontSize: '13px',
+                      fontWeight: 700,
+                      color: '#EF4444',
+                      minWidth: '64px',
+                      textAlign: 'right',
+                    }}
+                  >
+                    ₹{discountVal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </Typography>
+                </Box>
+
+                {/* Packing (% or ₹) */}
+                <Box
+                  sx={{
+                    display: 'grid',
+                    gridTemplateColumns: '125px 1fr auto',
+                    alignItems: 'center',
+                    gap: 1.2,
+                  }}
+                >
+                  <Typography sx={{ fontSize: '12.5px', fontWeight: 600, color: '#475569' }}>
+                    Packing (% or ₹):
+                  </Typography>
+                  <TextField
+                    size="small"
+                    placeholder="e.g. 2% or 200"
+                    value={packing}
+                    onChange={(e) => setPacking(e.target.value)}
+                    slotProps={{
+                      input: {
+                        sx: {
+                          height: '32px',
+                          fontSize: '12.5px',
+                          fontWeight: 500,
+                          borderRadius: '6px',
+                          backgroundColor: '#FFFFFF',
+                        },
+                      },
+                    }}
+                  />
+                  <Typography
+                    sx={{
+                      fontSize: '13px',
+                      fontWeight: 700,
+                      color: '#2563EB',
+                      minWidth: '64px',
+                      textAlign: 'right',
+                    }}
+                  >
+                    ₹{packingVal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </Typography>
+                </Box>
+
+                {/* Tax */}
+                <Box
+                  sx={{
+                    display: 'grid',
+                    gridTemplateColumns: '125px 1fr auto',
+                    alignItems: 'center',
+                    gap: 1.2,
+                  }}
+                >
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.7 }}>
+                    <Typography sx={{ fontSize: '12.5px', fontWeight: 600, color: '#475569' }}>
+                      Tax:
+                    </Typography>
+                    <Typography sx={{ fontSize: '12px', fontWeight: 700, color: '#16A34A' }}>
+                      {taxBreakdown.num > 0
+                        ? taxBreakdown.isPercent
+                          ? `${taxBreakdown.cleanNum}%`
+                          : `₹${taxBreakdown.num.toLocaleString('en-IN')}`
+                        : '18%'}
+                    </Typography>
+                  </Box>
+                  <TextField
+                    size="small"
+                    placeholder="e.g. 18%"
+                    value={tax}
+                    onChange={(e) => setTax(e.target.value)}
+                    slotProps={{
+                      input: {
+                        sx: {
+                          height: '32px',
+                          fontSize: '12.5px',
+                          fontWeight: 500,
+                          borderRadius: '6px',
+                          backgroundColor: '#FFFFFF',
+                        },
+                      },
+                    }}
+                  />
+                  <Typography
+                    sx={{
+                      fontSize: '13px',
+                      fontWeight: 700,
+                      color: '#16A34A',
+                      minWidth: '64px',
+                      textAlign: 'right',
+                    }}
+                  >
+                    ₹{taxVal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </Typography>
+                </Box>
+
+                {/* Net Total */}
+                <Box
+                  sx={{
+                    mt: 0.3,
+                    pt: 1.2,
+                    borderTop: '1px solid #EEF2F6',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}
+                >
+                  <Typography sx={{ fontSize: '15px', fontWeight: 800, color: '#0F172A' }}>
+                    Net Total:
+                  </Typography>
+                  <Typography sx={{ fontSize: '18px', fontWeight: 800, color: '#0B4DB7' }}>
+                    ₹{Number(finalTotalAmount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </Typography>
+                </Box>
+
+                {/* Submit Button */}
+                <Button
+                  variant="contained"
+                  disableElevation
+                  fullWidth
+                  onClick={handleCreateParticular}
+                  disabled={createLoading}
+                  sx={{
+                    mt: 0.4,
+                    background: 'linear-gradient(90deg, #0B4DB7 0%, #0EA5E9 100%)',
+                    color: '#FFFFFF',
+                    height: '40px',
+                    fontSize: '13.5px',
+                    fontWeight: 700,
+                    textTransform: 'none',
+                    borderRadius: '6px',
+                    '&:hover': {
+                      background: 'linear-gradient(90deg, #083B8D 0%, #0284C7 100%)',
+                    },
+                  }}
+                >
+                  {createLoading ? 'Submitting...' : 'Submit'}
+                </Button>
+              </Paper>
+            </Box>
           </Paper>
         </Box>
       )}
@@ -2588,6 +2828,9 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                     <TableCell sx={{ py: 1.5, px: { xs: 2, sm: 2.5 }, fontSize: '11.5px', fontWeight: 700, color: '#1E293B' }}>
                       COMPANY NAME
                     </TableCell>
+                    <TableCell align="center" sx={{ py: 1.5, px: { xs: 1.5, sm: 2 }, fontSize: '11.5px', fontWeight: 700, color: '#1E293B', width: '130px' }}>
+                      PAYMENT METHOD
+                    </TableCell>
                     <TableCell align="right" sx={{ py: 1.5, px: { xs: 1.5, sm: 2.5 }, fontSize: '11.5px', fontWeight: 700, color: '#1E293B', width: '110px' }}>
                       DEBIT
                     </TableCell>
@@ -2605,13 +2848,13 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                 <TableBody>
                   {accountLoading ? (
                     <TableRow>
-                      <TableCell colSpan={8} align="center" sx={{ py: 6 }}>
+                      <TableCell colSpan={9} align="center" sx={{ py: 6 }}>
                         <CircularProgress size={32} sx={{ color: '#0B4DB7' }} />
                       </TableCell>
                     </TableRow>
                   ) : sortedAccountDetails.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={8} align="center" sx={{ py: 6, color: '#64748B' }}>
+                      <TableCell colSpan={9} align="center" sx={{ py: 6, color: '#64748B' }}>
                         No account details found {filterCustomer && filterCustomer !== 'ALL' ? `for ${filterCustomer}` : ''}.
                       </TableCell>
                     </TableRow>
@@ -2619,6 +2862,13 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                     sortedAccountDetails.map((row: any, index: number) => {
                       const isLast = index === sortedAccountDetails.length - 1;
                       const rowId = row._id || row.id || '';
+                      const isCreditEntry =
+                        row.type !== 'BILL' ||
+                        (parseFloat(String(row.credit || '0').replace(/,/g, '')) || 0) > 0;
+                      const paymentLabel =
+                        isCreditEntry && row.paymentMode && String(row.paymentMode).trim()
+                          ? String(row.paymentMode).trim()
+                          : '-';
                       return (
                         <TableRow
                           key={rowId || index}
@@ -2639,6 +2889,23 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                           </TableCell>
                           <TableCell sx={{ py: 1.6, px: { xs: 2, sm: 2.5 }, fontSize: '13.5px', fontWeight: 600, color: '#0F172A', borderBottom: isLast ? 'none' : '1px solid #EEF2F6' }}>
                             {row.companyName && row.companyName !== 'General' ? row.companyName : '-'}
+                          </TableCell>
+                          <TableCell align="center" sx={{ py: 1.6, px: { xs: 1.5, sm: 2 }, fontSize: '12.5px', fontWeight: 600, color: '#334155', borderBottom: isLast ? 'none' : '1px solid #EEF2F6' }}>
+                            {paymentLabel !== '-' ? (
+                              <Chip
+                                label={paymentLabel}
+                                size="small"
+                                sx={{
+                                  height: '22px',
+                                  fontSize: '11.5px',
+                                  fontWeight: 700,
+                                  backgroundColor: '#EFF6FF',
+                                  color: '#0B4DB7',
+                                }}
+                              />
+                            ) : (
+                              '-'
+                            )}
                           </TableCell>
                           <TableCell align="right" sx={{ py: 1.6, px: { xs: 1.5, sm: 2.5 }, fontSize: '13.5px', fontWeight: 500, color: '#DC2626', borderBottom: isLast ? 'none' : '1px solid #EEF2F6' }}>
                             {row.debit}
@@ -2920,9 +3187,9 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                     const rowId = row._id || row.id || '';
                     const subtotalNum = parseFloat(String(row.amount || row.total || '0').replace(/,/g, '')) || 0;
                     const totalNum = parseFloat(String(row.total || row.amount || '0').replace(/,/g, '')) || 0;
-                    const discStr = row.discount && parseFloat(row.discount) > 0 ? (parseFloat(row.discount) <= 100 ? `${row.discount}%` : `₹${row.discount}`) : '-';
-                    const packStr = row.packing && parseFloat(row.packing) > 0 ? (parseFloat(row.packing) <= 100 ? `${row.packing}%` : `₹${row.packing}`) : '-';
-                    const taxStr = row.tax && parseFloat(row.tax) > 0 ? `₹${parseFloat(row.tax).toLocaleString('en-IN')}` : '-';
+                    const discStr = formatChargeDisplay(row.discount);
+                    const packStr = formatChargeDisplay(row.packing);
+                    const taxStr = formatChargeDisplay(row.tax);
                     const hasPdf = Boolean(row.pdfData && row.pdfData.trim() !== '');
                     const isUploading = uploadingBillId === rowId;
 
@@ -3216,65 +3483,6 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                 />
               </Box>
 
-              {/* Company Name */}
-              <Box
-                sx={{
-                  display: 'flex',
-                  flexDirection: { xs: 'column', sm: 'row' },
-                  alignItems: { xs: 'flex-start', sm: 'center' },
-                  gap: { xs: 1, sm: 3.5 },
-                }}
-              >
-                <Typography
-                  sx={{
-                    fontSize: '14px',
-                    fontWeight: 600,
-                    color: '#0F172A',
-                    minWidth: '150px',
-                    textAlign: { sm: 'right' },
-                  }}
-                >
-                  Company Name
-                </Typography>
-                <Autocomplete
-                  fullWidth
-                  size="small"
-                  autoHighlight
-                  options={companyOptions}
-                  getOptionLabel={(option) => (typeof option === 'string' ? option : option.name || '')}
-                  isOptionEqualToValue={(option, val) => option.id === val.id || option.name === val.name}
-                  value={companyOptions.find((c) => c.name === addCreditCompanyName) || null}
-                  onChange={(_, val) => setAddCreditCompanyName(val ? val.name : '')}
-                  renderInput={(params) => (
-                    <TextField
-                      {...params}
-                      placeholder="Search Company..."
-                      sx={{
-                        backgroundColor: '#FFFFFF',
-                        borderRadius: '6px',
-                        '& .MuiOutlinedInput-root': {
-                          height: '42px',
-                          borderRadius: '6px',
-                          fontSize: '13.5px',
-                          fontWeight: 500,
-                          color: '#0F172A',
-                          '& fieldset': {
-                            borderColor: '#CBD5E1',
-                          },
-                          '&:hover fieldset': {
-                            borderColor: '#94A3B8',
-                          },
-                          '&.Mui-focused fieldset': {
-                            borderColor: '#0B4DB7',
-                            borderWidth: '1.5px',
-                          },
-                        },
-                      }}
-                    />
-                  )}
-                />
-              </Box>
-
               {/* Credit Amount */}
               <Box
                 sx={{
@@ -3322,6 +3530,76 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                 />
               </Box>
 
+              {/* Payment Method */}
+              <Box
+                sx={{
+                  display: 'flex',
+                  flexDirection: { xs: 'column', sm: 'row' },
+                  alignItems: { xs: 'flex-start', sm: 'center' },
+                  gap: { xs: 1, sm: 3.5 },
+                }}
+              >
+                <Typography
+                  sx={{
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    color: '#0F172A',
+                    minWidth: '150px',
+                    textAlign: { sm: 'right' },
+                  }}
+                >
+                  Payment Method
+                </Typography>
+                <Autocomplete
+                  fullWidth
+                  freeSolo
+                  openOnFocus
+                  disableClearable
+                  size="small"
+                  autoHighlight
+                  options={['Cash', 'Bank', 'UPI', 'Bank Transfer', 'Cheque', 'NEFT / RTGS']}
+                  value={creditPaymentMode}
+                  inputValue={creditPaymentMode}
+                  filterOptions={(opts, state) => {
+                    const q = state.inputValue.trim().toLowerCase();
+                    if (!q || opts.some((o) => o.toLowerCase() === q)) return opts;
+                    return opts.filter((o) => o.toLowerCase().includes(q));
+                  }}
+                  onChange={(_, val) => setCreditPaymentMode(typeof val === 'string' ? val : 'Bank')}
+                  onInputChange={(_, newInputValue, reason) => {
+                    if (reason === 'input') {
+                      setCreditPaymentMode(newInputValue);
+                    }
+                  }}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      placeholder="Select or type payment method (e.g. Cash, UPI, Bank)"
+                      sx={{
+                        backgroundColor: '#FFFFFF',
+                        borderRadius: '6px',
+                        '& .MuiOutlinedInput-root': {
+                          height: '42px',
+                          borderRadius: '6px',
+                          fontSize: '13.5px',
+                          fontWeight: 600,
+                          color: '#0F172A',
+                          '& fieldset': {
+                            borderColor: '#CBD5E1',
+                          },
+                          '&:hover fieldset': {
+                            borderColor: '#94A3B8',
+                          },
+                          '&.Mui-focused fieldset': {
+                            borderColor: '#0B4DB7',
+                            borderWidth: '1.5px',
+                          },
+                        },
+                      }}
+                    />
+                  )}
+                />
+              </Box>
 
               {/* Date */}
               <Box
@@ -3845,12 +4123,12 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
 
             <Box>
               <Typography sx={{ fontSize: '12.5px', fontWeight: 600, color: '#475569', mb: 0.5 }}>
-                Tax (₹)
+                Tax (% or ₹)
               </Typography>
               <TextField
                 fullWidth
                 size="small"
-                placeholder="Enter Tax Amount"
+                placeholder="e.g. 18% or 500"
                 value={editBillForm.tax}
                 onChange={(e) => setEditBillForm((prev) => ({ ...prev, tax: e.target.value }))}
                 slotProps={{
@@ -3888,9 +4166,10 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                 <TableRow sx={{ backgroundColor: '#F8FAFC' }}>
                   <TableCell sx={{ fontSize: '11px', fontWeight: 700, width: '40px' }}>#</TableCell>
                   <TableCell sx={{ fontSize: '11px', fontWeight: 700 }}>Particular / Item</TableCell>
-                  <TableCell sx={{ fontSize: '11px', fontWeight: 700, width: '90px' }}>Qty</TableCell>
+                  <TableCell sx={{ fontSize: '11px', fontWeight: 700, width: '125px' }}>Measurement</TableCell>
+                  <TableCell sx={{ fontSize: '11px', fontWeight: 700, width: '80px' }}>Qty</TableCell>
                   <TableCell sx={{ fontSize: '11px', fontWeight: 700, width: '90px' }}>Rate (₹)</TableCell>
-                  <TableCell sx={{ fontSize: '11px', fontWeight: 700, width: '90px' }}>Unit</TableCell>
+                  <TableCell sx={{ fontSize: '11px', fontWeight: 700, width: '85px' }}>Unit</TableCell>
                   <TableCell align="right" sx={{ fontSize: '11px', fontWeight: 700, width: '110px' }}>Amount (₹)</TableCell>
                   <TableCell align="center" sx={{ fontSize: '11px', fontWeight: 700, width: '50px' }}>Del</TableCell>
                 </TableRow>
@@ -3898,7 +4177,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
               <TableBody>
                 {editBillForm.products.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} align="center" sx={{ py: 3, color: '#64748B', fontSize: '12.5px' }}>
+                    <TableCell colSpan={8} align="center" sx={{ py: 3, color: '#64748B', fontSize: '12.5px' }}>
                       No items. Click "+ Add Item" above to add products.
                     </TableCell>
                   </TableRow>
@@ -3916,6 +4195,18 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                           slotProps={{
                             input: { sx: { fontSize: '12.5px', fontWeight: 600, height: '32px' } },
                           }}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <MeasurementInput
+                          value={prod.measurement || ''}
+                          onChange={(val) => handleUpdateEditProductRow(idx, 'measurement', val)}
+                          options={measurementOptions}
+                          placeholder="e.g. drum"
+                          height="32px"
+                          borderRadius="4px"
+                          fontSize="12.5px"
+                          sx={{ width: '115px' }}
                         />
                       </TableCell>
                       <TableCell>

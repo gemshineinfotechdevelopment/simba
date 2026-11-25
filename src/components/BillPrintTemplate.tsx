@@ -1,10 +1,12 @@
 import React from 'react';
+import { calculateBillCharges } from '../utils/chargeUtils';
 
 export interface BillPrintProduct {
   particular: string;
   quantity: string | number;
   rate: string | number;
   pktUnit: string | number;
+  measurement?: string;
   amount: string | number;
 }
 
@@ -42,57 +44,35 @@ export const BillPrintTemplate: React.FC<BillPrintTemplateProps> = ({ bill }) =>
   }, 0);
   const subtotal = prodSubtotal > 0 ? prodSubtotal : (parseFloat(String(bill.amount || bill.total || '0').replace(/,/g, '')) || 0);
 
-  // Discount calculation
-  const rawDiscStr = String(bill.discount ?? '').trim();
-  const cleanDisc = rawDiscStr.replace(/[^0-9.]/g, '');
-  const discNum = parseFloat(cleanDisc) || 0;
-  let discountAmt = 0;
-  let discountLabel = 'Discount Amount';
-  if (discNum > 0) {
-    const isDiscFlat = rawDiscStr.startsWith('₹') || rawDiscStr.toLowerCase().includes('rs');
-    if (rawDiscStr.includes('%') || (!isDiscFlat && discNum <= 100)) {
-      discountAmt = (subtotal * discNum) / 100;
-      discountLabel = `Discount Amount (${cleanDisc}%)`;
-    } else {
-      discountAmt = discNum;
-      discountLabel = `Discount Amount (₹${discNum.toLocaleString('en-IN')})`;
-    }
-  } else {
-    discountLabel = 'Discount Amount';
-  }
+  const {
+    discountParsed,
+    packingParsed,
+    taxParsed,
+    discountAmt,
+    packingAmt,
+    taxAmt,
+  } = calculateBillCharges(bill, subtotal);
 
-  // Packing calculation (Calculated from reduced amount after discount)
-  const rawPackStr = String(bill.packing ?? '').trim();
-  const cleanPack = rawPackStr.replace(/[^0-9.]/g, '');
-  const packNum = parseFloat(cleanPack) || 0;
-  let packingAmt = 0;
-  let packingLabel = 'Packing Charges';
-  if (packNum > 0) {
-    const baseAfterDiscount = Math.max(0, subtotal - discountAmt);
-    const isPackFlat = rawPackStr.startsWith('₹') || rawPackStr.toLowerCase().includes('rs');
-    if (rawPackStr.includes('%') || (!isPackFlat && packNum <= 100)) {
-      packingAmt = (baseAfterDiscount * packNum) / 100;
-      packingLabel = `Packing Charges (${cleanPack}%)`;
-    } else {
-      packingAmt = packNum;
-      packingLabel = `Packing Charges (₹${packNum.toLocaleString('en-IN')})`;
-    }
-  } else {
-    packingLabel = 'Packing Charges';
-  }
+  const discountLabel =
+    discountParsed.num > 0
+      ? discountParsed.isPercent
+        ? `Discount Amount (${discountParsed.cleanNum}%)`
+        : `Discount Amount (₹${discountParsed.num.toLocaleString('en-IN')})`
+      : 'Discount Amount';
 
-  // Tax calculation (Flat amount or tax)
-  const rawTaxStr = String(bill.tax ?? '').trim();
-  const cleanTax = rawTaxStr.replace(/[^0-9.]/g, '');
-  const taxNum = parseFloat(cleanTax) || 0;
-  let taxAmt = 0;
-  let taxLabel = 'Tax Amount';
-  if (taxNum > 0) {
-    taxAmt = taxNum;
-    taxLabel = `Tax Amount (₹${taxNum.toLocaleString('en-IN')})`;
-  } else {
-    taxLabel = 'Tax Amount';
-  }
+  const packingLabel =
+    packingParsed.num > 0
+      ? packingParsed.isPercent
+        ? `Packing Charges (${packingParsed.cleanNum}%)`
+        : `Packing Charges (₹${packingParsed.num.toLocaleString('en-IN')})`
+      : 'Packing Charges';
+
+  const taxLabel =
+    taxParsed.num > 0
+      ? taxParsed.isPercent
+        ? `Tax (${taxParsed.cleanNum}%)`
+        : `Tax Amount (₹${taxParsed.num.toLocaleString('en-IN')})`
+      : 'Tax Amount';
 
   // Grand Total calculation
   const calculatedTotal = Math.max(0, subtotal - discountAmt + packingAmt + taxAmt);
@@ -216,15 +196,18 @@ export const BillPrintTemplate: React.FC<BillPrintTemplateProps> = ({ bill }) =>
               Particular / Product Description
             </th>
             <th style={{ border: '1px solid #0F172A', padding: '8px 6px', textAlign: 'center', width: '75px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase' }}>
+              Meas.
+            </th>
+            <th style={{ border: '1px solid #0F172A', padding: '8px 6px', textAlign: 'center', width: '70px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase' }}>
               Cases
             </th>
             <th style={{ border: '1px solid #0F172A', padding: '8px 8px', textAlign: 'right', width: '85px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase' }}>
               Rate (₹)
             </th>
-            <th style={{ border: '1px solid #0F172A', padding: '8px 6px', textAlign: 'center', width: '80px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase' }}>
+            <th style={{ border: '1px solid #0F172A', padding: '8px 6px', textAlign: 'center', width: '75px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase' }}>
               Pkt / Unit
             </th>
-            <th style={{ border: '1px solid #0F172A', padding: '8px 10px', textAlign: 'right', width: '110px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase' }}>
+            <th style={{ border: '1px solid #0F172A', padding: '8px 10px', textAlign: 'right', width: '105px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase' }}>
               Amount (₹)
             </th>
           </tr>
@@ -232,7 +215,7 @@ export const BillPrintTemplate: React.FC<BillPrintTemplateProps> = ({ bill }) =>
         <tbody>
           {(bill.products || []).length === 0 ? (
             <tr>
-              <td colSpan={6} style={{ border: '1px solid #CBD5E1', textAlign: 'center', padding: '16px', color: '#64748B' }}>
+              <td colSpan={7} style={{ border: '1px solid #CBD5E1', textAlign: 'center', padding: '16px', color: '#64748B' }}>
                 No product items in bill
               </td>
             </tr>
@@ -244,6 +227,7 @@ export const BillPrintTemplate: React.FC<BillPrintTemplateProps> = ({ bill }) =>
                 <tr key={idx} style={{ backgroundColor: isEven ? '#F8FAFC' : '#FFFFFF' }}>
                   <td style={{ border: '1px solid #CBD5E1', padding: '7px 6px', textAlign: 'center', color: '#475569', fontWeight: 600 }}>{idx + 1}</td>
                   <td style={{ border: '1px solid #CBD5E1', padding: '7px 10px', fontWeight: 700, color: '#0F172A' }}>{item.particular || '-'}</td>
+                  <td style={{ border: '1px solid #CBD5E1', padding: '7px 6px', textAlign: 'center', color: '#475569', fontWeight: 600 }}>{item.measurement && item.measurement.trim() ? item.measurement : '-'}</td>
                   <td style={{ border: '1px solid #CBD5E1', padding: '7px 6px', textAlign: 'center', fontWeight: 700, color: '#0F172A' }}>{item.quantity || '-'}</td>
                   <td style={{ border: '1px solid #CBD5E1', padding: '7px 8px', textAlign: 'right', color: '#334155' }}>₹ {(parseFloat(String(item.rate)) || 0).toFixed(2)}</td>
                   <td style={{ border: '1px solid #CBD5E1', padding: '7px 6px', textAlign: 'center', color: '#64748B' }}>{item.pktUnit && item.pktUnit !== '-' ? item.pktUnit : '-'}</td>

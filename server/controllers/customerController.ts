@@ -244,12 +244,18 @@ export const getCustomerById = async (req: Request, res: Response, next: NextFun
 export const createCustomer = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { name, mobile, address, gst, idCode } = req.body;
+    const normalizedMobile = mobile ? String(mobile).trim() : 'N/A';
+
+    if (normalizedMobile !== 'N/A' && !/^\d{10}$/.test(normalizedMobile)) {
+      res.status(400).json({ success: false, error: 'Mobile number must be exactly 10 digits' });
+      return;
+    }
 
     const finalIdCode = await getNextCustomerIdCode(idCode);
 
     const customer = await Customer.create({
       name,
-      mobile,
+      mobile: normalizedMobile,
       address,
       gst,
       idCode: finalIdCode,

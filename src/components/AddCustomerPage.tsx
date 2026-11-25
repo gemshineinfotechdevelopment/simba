@@ -30,9 +30,12 @@ export const AddCustomerPage: FC<AddCustomerPageProps> = ({
   const handleChange = (field: string) => (
     e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
   ) => {
+    const rawValue = e.target.value;
+    const nextValue =
+      field === 'mobileNumber' ? rawValue.replace(/\D/g, '').slice(0, 10) : rawValue;
     setFormData((prev) => ({
       ...prev,
-      [field]: e.target.value,
+      [field]: nextValue,
     }));
   };
 
@@ -42,11 +45,17 @@ export const AddCustomerPage: FC<AddCustomerPageProps> = ({
       return;
     }
 
+    const mobileDigits = formData.mobileNumber.replace(/\D/g, '');
+    if (mobileDigits.length > 0 && mobileDigits.length !== 10) {
+      alert('Please enter a valid 10-digit mobile number');
+      return;
+    }
+
     try {
       setLoading(true);
       await CustomersApi.create({
         name: formData.fullName.trim(),
-        mobile: formData.mobileNumber.trim() || 'N/A',
+        mobile: mobileDigits || 'N/A',
         gst: formData.gstin.trim() || 'N/A',
         address: formData.billingAddress.trim(),
         avatarLetter: formData.fullName.trim().charAt(0).toUpperCase(),
@@ -58,7 +67,11 @@ export const AddCustomerPage: FC<AddCustomerPageProps> = ({
       }
     } catch (err) {
       console.error('Failed to create customer:', err);
-      alert('Error creating customer. Please check your backend connection.');
+      alert(
+        err instanceof Error && err.message
+          ? err.message
+          : 'Error creating customer. Please check your backend connection.'
+      );
     } finally {
       setLoading(false);
     }
@@ -201,9 +214,15 @@ export const AddCustomerPage: FC<AddCustomerPageProps> = ({
               >
                 <InputBase
                   fullWidth
-                  placeholder="e.g. +91 98765 43210"
+                  type="tel"
+                  placeholder="e.g. 9876543210"
                   value={formData.mobileNumber}
                   onChange={handleChange('mobileNumber')}
+                  inputProps={{
+                    maxLength: 10,
+                    inputMode: 'numeric',
+                    pattern: '[0-9]{10}',
+                  }}
                   sx={{
                     fontSize: '13.5px',
                     fontWeight: 500,

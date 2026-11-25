@@ -46,10 +46,12 @@ import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded';
 import BusinessRoundedIcon from '@mui/icons-material/BusinessRounded';
 import ListAltRoundedIcon from '@mui/icons-material/ListAltRounded';
 import WhatsAppIcon from '@mui/icons-material/WhatsApp';
-import { CustomersApi, ProductsApi, CompaniesApi, PerformasApi } from '../services/api';
+import { CustomersApi, ProductsApi, CompaniesApi, PerformasApi, ParticularsApi } from '../services/api';
 import { PerformaPrintModal } from './PerformaPrintModal';
 import type { PerformaPrintData } from './PerformaPrintTemplate';
 import { sharePerformaOnWhatsApp } from '../utils/whatsappUtils';
+import { extractSavedMeasurements, mergeMeasurementOptions } from '../utils/measurements';
+import { MeasurementInput } from './MeasurementInput';
 
 export type PerformaSubTab = 'Create Performa' | 'Customer Performa List';
 
@@ -65,6 +67,7 @@ interface ProductRowItem {
   requiredCases: string;
   rate: string;
   pktUnit: string;
+  measurement?: string;
   allocatedAmount: string;
 }
 
@@ -80,6 +83,7 @@ interface EditProductItem {
   remainingCases?: number;
   rate: number | string;
   pktPerUnit: number | string;
+  measurement?: string;
   allocatedAmount: number | string;
 }
 
@@ -135,6 +139,8 @@ export const PerformaPage: FC<PerformaPageProps> = ({
   const [requiredCases, setRequiredCases] = useState<string>('');
   const [rate, setRate] = useState<string>('');
   const [pktUnit, setPktUnit] = useState<string>('1');
+  const [productMeasurement, setProductMeasurement] = useState<string>('');
+  const [savedMeasurements, setSavedMeasurements] = useState<string[]>([]);
 
   // Product Rows
   const [productRows, setProductRows] = useState<ProductRowItem[]>([]);
@@ -185,16 +191,20 @@ export const PerformaPage: FC<PerformaPageProps> = ({
     const initData = async () => {
       try {
         setLoadingInitial(true);
-        const [custList, prodList, compList, nextNumRes] = await Promise.all([
+        const [custList, prodList, compList, nextNumRes, perfListRes, partListRes] = await Promise.all([
           CustomersApi.getAll(),
           ProductsApi.getAll(),
           CompaniesApi.getAll(),
           PerformasApi.getNextNumber().catch(() => ({ nextPerformaNumber: 'PF-000001' })),
+          PerformasApi.getAll().catch(() => []),
+          ParticularsApi.getAll().catch(() => []),
         ]);
 
         setCustomers(custList || []);
         setProducts(prodList || []);
         setCompanies(compList || []);
+        const perfArr = Array.isArray(perfListRes) ? perfListRes : perfListRes?.data || [];
+        setSavedMeasurements(extractSavedMeasurements([...perfArr, ...(partListRes || [])]));
         if (nextNumRes?.nextPerformaNumber) {
           setPerformaNumber(nextNumRes.nextPerformaNumber);
         }
@@ -284,14 +294,16 @@ export const PerformaPage: FC<PerformaPageProps> = ({
     return matched.length > 0 ? matched : products;
   }, [products, productCompany]);
 
-  // When product dropdown selected, autofill code, company, rate without overwriting user entered company
+  // When product dropdown selected, autofill code, company, rate, measurement without overwriting user entered company
   const handleProductSelect = (prod: any | null) => {
     setSelectedProductObj(prod);
     if (prod) {
       setProductName(prod.name || '');
       setProductCode(prod.code || prod.idCode || `#${prod.slNo || ''}`);
-      setRate(prod.rate ? String(prod.rate) : '');
+      const defaultRate = prod.amount ?? prod.rate;
+      setRate(defaultRate !== undefined && defaultRate !== null && Number(defaultRate) > 0 ? String(defaultRate) : '');
       setPktUnit(prod.pktUnit || '1');
+      setProductMeasurement(prod.measurement ? String(prod.measurement) : '');
       // If product has a brand name and user hasn't typed one yet, autofill it
       if (prod.companyName && prod.companyName.toLowerCase() !== 'general') {
         if (!productCompany.trim() || productCompany.trim().toLowerCase() === 'general') {
@@ -303,6 +315,7 @@ export const PerformaPage: FC<PerformaPageProps> = ({
       setProductCode('');
       setRate('');
       setPktUnit('1');
+      setProductMeasurement('');
     }
   };
 
@@ -342,6 +355,7 @@ export const PerformaPage: FC<PerformaPageProps> = ({
       requiredCases: String(casesVal),
       rate: String(rateVal),
       pktUnit: String(unitsVal),
+      measurement: productMeasurement.trim(),
       allocatedAmount: allocatedAmt,
     };
 
@@ -354,6 +368,7 @@ export const PerformaPage: FC<PerformaPageProps> = ({
     setRequiredCases('');
     setRate('');
     setPktUnit('1');
+    setProductMeasurement('');
   };
 
   const handleRemoveProductRow = (id: string) => {
@@ -464,6 +479,17 @@ export const PerformaPage: FC<PerformaPageProps> = ({
     return totalReceivedAmount - purchaseAmount;
   }, [customerPerformaSummary, totalReceivedAmount, purchaseAmount]);
 
+  const measurementOptions = useMemo(
+    () =>
+      mergeMeasurementOptions([
+        ...products.map((p: any) => p.measurement),
+        ...savedMeasurements,
+        ...productRows.map((r) => r.measurement),
+        ...editProducts.map((p) => p.measurement),
+      ]),
+    [products, savedMeasurements, productRows, editProducts]
+  );
+
   // Reset Form
   const handleReset = async () => {
     setProductRows([]);
@@ -478,6 +504,7 @@ export const PerformaPage: FC<PerformaPageProps> = ({
     setRequiredCases('');
     setRate('');
     setPktUnit('1');
+    setProductMeasurement('');
     try {
       const nextRes = await PerformasApi.getNextNumber();
       if (nextRes?.nextPerformaNumber) setPerformaNumber(nextRes.nextPerformaNumber);
@@ -533,11 +560,17 @@ export const PerformaPage: FC<PerformaPageProps> = ({
           requiredCases: parseFloat(r.requiredCases) || 0,
           rate: parseFloat(r.rate) || 0,
           pktPerUnit: parseFloat(r.pktUnit) || 1,
+          measurement: r.measurement || '',
           allocatedAmount: parseFloat(r.allocatedAmount) || 0,
         })),
       };
 
       const created = await PerformasApi.create(payload);
+
+      const submittedUnits = productRows.map((r) => (r.measurement || '').trim()).filter(Boolean);
+      if (submittedUnits.length > 0) {
+        setSavedMeasurements((prev) => Array.from(new Set([...prev, ...submittedUnits])));
+      }
 
       setToast({
         open: true,
@@ -633,6 +666,7 @@ export const PerformaPage: FC<PerformaPageProps> = ({
         remainingCases: p.remainingCases,
         rate: p.rate,
         pktPerUnit: p.pktPerUnit || 1,
+        measurement: p.measurement || p.productSnapshot?.measurement || '',
         allocatedAmount: p.allocatedAmount,
       })),
       totalRequiredCases: fullPerforma.totalRequiredCases,
@@ -690,6 +724,7 @@ export const PerformaPage: FC<PerformaPageProps> = ({
         remainingCases: p.remainingCases || p.requiredCases || 0,
         rate: p.rate || 0,
         pktPerUnit: p.pktPerUnit || 1,
+        measurement: p.measurement || p.productSnapshot?.measurement || '',
         allocatedAmount: p.allocatedAmount || (p.requiredCases || 0) * (p.rate || 0) * (p.pktPerUnit || 1),
       }));
 
@@ -702,7 +737,11 @@ export const PerformaPage: FC<PerformaPageProps> = ({
     }
   };
 
-  const handleEditProductChange = (id: string, field: 'requiredCases' | 'rate' | 'pktPerUnit' | 'companyName' | 'productName', val: string) => {
+  const handleEditProductChange = (
+    id: string,
+    field: 'requiredCases' | 'rate' | 'pktPerUnit' | 'companyName' | 'productName' | 'measurement',
+    val: string
+  ) => {
     setEditProducts((prev) =>
       prev.map((item) => {
         if (item.id !== id) return item;
@@ -816,11 +855,16 @@ export const PerformaPage: FC<PerformaPageProps> = ({
           usedCases: p.usedCases || 0,
           rate: parseFloat(String(p.rate)) || 0,
           pktPerUnit: parseFloat(String(p.pktPerUnit)) || 1,
+          measurement: p.measurement || '',
           allocatedAmount: parseFloat(String(p.allocatedAmount)) || 0,
         })),
       };
 
       await PerformasApi.update(editPerformaId, payload);
+      const editedUnits = editProducts.map((p) => (p.measurement || '').trim()).filter(Boolean);
+      if (editedUnits.length > 0) {
+        setSavedMeasurements((prev) => Array.from(new Set([...prev, ...editedUnits])));
+      }
       setToast({ open: true, message: `Performa ${editPerformaNumber} updated successfully!`, severity: 'success' });
       setEditModalOpen(false);
       if (selectedCustomer) fetchCustomerPerformaData(selectedCustomer);
@@ -1356,7 +1400,7 @@ export const PerformaPage: FC<PerformaPageProps> = ({
               <Box
                 sx={{
                   display: 'grid',
-                  gridTemplateColumns: { xs: '1fr', sm: '2.5fr 1.2fr 1fr 0.8fr auto' },
+                  gridTemplateColumns: { xs: '1fr', sm: '2.2fr 1.3fr 1fr 0.9fr 0.75fr auto' },
                   gap: 1.5,
                   alignItems: 'center',
                 }}
@@ -1378,11 +1422,11 @@ export const PerformaPage: FC<PerformaPageProps> = ({
                         <Typography sx={{ fontWeight: 700, fontSize: '13px', color: '#0F172A' }}>
                           {option.name}
                         </Typography>
-                        {option.rate && (
+                        {(option.amount ?? option.rate) ? (
                           <Typography sx={{ fontWeight: 700, fontSize: '12px', color: '#16A34A' }}>
-                            ₹{parseFloat(option.rate).toLocaleString('en-IN')}
+                            ₹{parseFloat(option.amount ?? option.rate).toLocaleString('en-IN')}
                           </Typography>
-                        )}
+                        ) : null}
                       </Box>
                       <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mt: 0.3 }}>
                         {option.companyName && (
@@ -1412,6 +1456,18 @@ export const PerformaPage: FC<PerformaPageProps> = ({
                       }
                     />
                   )}
+                />
+
+                {/* Measurement */}
+                <MeasurementInput
+                  label="Measurement"
+                  value={productMeasurement}
+                  onChange={setProductMeasurement}
+                  options={measurementOptions}
+                  placeholder="e.g. drum, kg"
+                  height="40px"
+                  borderRadius="8px"
+                  fontSize="13.5px"
                 />
 
                 {/* Required Cases */}
@@ -1571,6 +1627,9 @@ export const PerformaPage: FC<PerformaPageProps> = ({
                               <TableCell sx={{ fontWeight: 800, color: '#64748B', fontSize: '11px', textTransform: 'uppercase' }}>
                                 CUSTOMER PRODUCT REQUIRED
                               </TableCell>
+                              <TableCell sx={{ fontWeight: 800, textAlign: 'center', color: '#64748B', width: '115px', fontSize: '11px', textTransform: 'uppercase' }}>
+                                MEASUREMENT
+                              </TableCell>
                               <TableCell sx={{ fontWeight: 800, textAlign: 'center', color: '#64748B', width: '130px', fontSize: '11px', textTransform: 'uppercase' }}>
                                 REQUIRED CASES
                               </TableCell>
@@ -1596,6 +1655,23 @@ export const PerformaPage: FC<PerformaPageProps> = ({
                                 </TableCell>
                                 <TableCell sx={{ fontWeight: 700, color: '#0F172A', fontSize: '13.5px' }}>
                                   {row.productName}
+                                </TableCell>
+                                <TableCell sx={{ textAlign: 'center', color: '#475569', fontSize: '12.5px', fontWeight: 600 }}>
+                                  {row.measurement ? (
+                                    <Chip
+                                      label={row.measurement}
+                                      size="small"
+                                      sx={{
+                                        height: '22px',
+                                        fontSize: '11.5px',
+                                        fontWeight: 700,
+                                        backgroundColor: '#F1F5F9',
+                                        color: '#0F172A',
+                                      }}
+                                    />
+                                  ) : (
+                                    '-'
+                                  )}
                                 </TableCell>
                                 <TableCell sx={{ textAlign: 'center', fontWeight: 800, color: '#0B4DB7', fontSize: '13px' }}>
                                   {row.requiredCases} Cases
@@ -2340,6 +2416,7 @@ export const PerformaPage: FC<PerformaPageProps> = ({
                     <TableRow>
                       <TableCell sx={{ fontWeight: 800, width: '40px' }}>#</TableCell>
                       <TableCell sx={{ fontWeight: 800 }}>Product Name & Code</TableCell>
+                      <TableCell sx={{ fontWeight: 800, textAlign: 'center', width: '100px' }}>Measurement</TableCell>
                       <TableCell sx={{ fontWeight: 800 }}>Company / Brand</TableCell>
                       <TableCell sx={{ fontWeight: 800, textAlign: 'center', width: '90px' }}>Total Cases</TableCell>
                       <TableCell sx={{ fontWeight: 800, textAlign: 'right', width: '90px' }}>Rate (₹)</TableCell>
@@ -2355,6 +2432,9 @@ export const PerformaPage: FC<PerformaPageProps> = ({
                           {prod.productSnapshot?.productCode && (
                             <div style={{ fontSize: '11px', color: '#64748B' }}>Code: {prod.productSnapshot.productCode}</div>
                           )}
+                        </TableCell>
+                        <TableCell sx={{ textAlign: 'center', fontWeight: 600, color: '#475569' }}>
+                          {prod.measurement || prod.productSnapshot?.measurement || '-'}
                         </TableCell>
                         <TableCell sx={{ color: '#0B4DB7', fontWeight: 600 }}>
                           {prod.productSnapshot?.companyName || prod.companyName || selectedPerformaForView.companyName || '-'}
@@ -2678,6 +2758,7 @@ export const PerformaPage: FC<PerformaPageProps> = ({
                     <TableHead sx={{ backgroundColor: '#F8FAFC' }}>
                       <TableRow>
                         <TableCell sx={{ fontWeight: 800 }}>Product Name & Code</TableCell>
+                        <TableCell sx={{ fontWeight: 800, width: '130px' }}>Measurement</TableCell>
                         <TableCell sx={{ fontWeight: 800 }}>Company / Brand</TableCell>
                         <TableCell sx={{ fontWeight: 800, width: '130px' }}>Req Cases</TableCell>
                         <TableCell sx={{ fontWeight: 800, width: '130px' }}>Rate (₹)</TableCell>
@@ -2692,6 +2773,18 @@ export const PerformaPage: FC<PerformaPageProps> = ({
                           <TableCell>
                             <Typography sx={{ fontWeight: 700, fontSize: '13px' }}>{p.productName}</Typography>
                             <Typography sx={{ fontSize: '11px', color: '#64748B' }}>{p.productCode}</Typography>
+                          </TableCell>
+                          <TableCell>
+                            <MeasurementInput
+                              value={p.measurement || ''}
+                              onChange={(val) => handleEditProductChange(p.id, 'measurement', val)}
+                              options={measurementOptions}
+                              placeholder="e.g. drum"
+                              height="36px"
+                              borderRadius="6px"
+                              fontSize="13px"
+                              sx={{ width: '120px' }}
+                            />
                           </TableCell>
                           <TableCell>
                             <TextField

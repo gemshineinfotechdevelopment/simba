@@ -5,6 +5,7 @@ export interface IParticularProductItem {
   quantity: string;
   rate: string;
   pktUnit: string;
+  measurement?: string;
   amount: string;
 }
 
@@ -33,6 +34,7 @@ const ParticularProductItemSchema: Schema = new Schema({
   quantity: { type: String, default: '' },
   rate: { type: String, default: '' },
   pktUnit: { type: String, default: '' },
+  measurement: { type: String, trim: true, default: '' },
   amount: { type: String, default: '' },
 });
 
