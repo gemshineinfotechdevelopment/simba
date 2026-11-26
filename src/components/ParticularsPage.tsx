@@ -31,12 +31,8 @@ import ModeEditOutlineRoundedIcon from '@mui/icons-material/ModeEditOutlineRound
 import VisibilityRoundedIcon from '@mui/icons-material/VisibilityRounded';
 import ReceiptLongRoundedIcon from '@mui/icons-material/ReceiptLongRounded';
 import AccountBalanceWalletRoundedIcon from '@mui/icons-material/AccountBalanceWalletRounded';
-import UploadFileRoundedIcon from '@mui/icons-material/UploadFileRounded';
-import PictureAsPdfRoundedIcon from '@mui/icons-material/PictureAsPdfRounded';
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
 import CheckRoundedIcon from '@mui/icons-material/CheckRounded';
-import DownloadRoundedIcon from '@mui/icons-material/DownloadRounded';
-import OpenInNewRoundedIcon from '@mui/icons-material/OpenInNewRounded';
 import WhatsAppIcon from '@mui/icons-material/WhatsApp';
 import {
   CustomersApi,
@@ -78,11 +74,22 @@ const SUB_TABS: ParticularSubTab[] = [
 interface ProductRowItem {
   id: string;
   particular: string;
+  companyName?: string;
   quantity: string;
   rate: string;
   pktUnit: string;
   measurement?: string;
   amount: string;
+}
+
+interface ProductDropdownOption {
+  id: string;
+  name: string;
+  rate?: number | null;
+  measurement?: string;
+  pktUnit?: string;
+  companyId?: string | null;
+  companyName?: string;
 }
 
 interface ParticularsPageProps {
@@ -102,14 +109,15 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
   // Live Dropdown options
   const [customerOptions, setCustomerOptions] = useState<{ id: string; name: string }[]>([]);
   const [companyOptions, setCompanyOptions] = useState<{ id: string; name: string }[]>([]);
-  const [productOptions, setProductOptions] = useState<
-    { id: string; name: string; rate?: number | null; measurement?: string }[]
-  >([]);
+  const [productOptions, setProductOptions] = useState<ProductDropdownOption[]>([]);
 
   // Persistent Selected Customer for Creation & Filter
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
   const [currentCustomerName, setCurrentCustomerName] = useState<string>(() => {
     return initialCustomerName || '';
+  });
+  const [isCustomerLocked, setIsCustomerLocked] = useState<boolean>(() => {
+    return Boolean(initialCustomerName);
   });
   const [filterCustomer, setFilterCustomer] = useState<string>(() => {
     return initialCustomerName || '';
@@ -131,22 +139,23 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
   }, [filterCustomer, currentCustomerName]);
 
   // Subtab 2: Create Particular Form State
-  const [caseCount, setCaseCount] = useState<string>('0');
   const [company, setCompany] = useState<string>('');
   const [discount, setDiscount] = useState<string>('');
   const [transport, setTransport] = useState<string>('');
   const [packing, setPacking] = useState<string>('');
   const [billNo, setBillNo] = useState<string>('');
   const [tax, setTax] = useState<string>('');
+  const [taxRupees, setTaxRupees] = useState<string>('');
   const [date, setDate] = useState<string>(() => {
     const today = new Date();
     return today.toLocaleDateString('en-GB').replace(/\//g, '-');
   });
 
   // Product Entry Form State
+  const [selectedProductId, setSelectedProductId] = useState<string>('');
   const [selectedProduct, setSelectedProduct] = useState<string>('');
+  const [productEntryKey, setProductEntryKey] = useState<number>(0);
   const [productMeasurement, setProductMeasurement] = useState<string>('');
-  const [quantity, setQuantity] = useState<string>('');
   const [rate, setRate] = useState<string>('');
   const [pkt, setPkt] = useState<string>('');
   const [productRows, setProductRows] = useState<ProductRowItem[]>([]);
@@ -154,10 +163,9 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
   const [editRowData, setEditRowData] = useState<{
     particular: string;
     measurement: string;
-    quantity: string;
     rate: string;
     pktUnit: string;
-  }>({ particular: '', measurement: '', quantity: '', rate: '', pktUnit: '' });
+  }>({ particular: '', measurement: '', rate: '', pktUnit: '' });
   const [createLoading, setCreateLoading] = useState(false);
 
   // Subtab 3: Account Details State
@@ -201,6 +209,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
     products: Array<{
       id?: string;
       particular: string;
+      companyName?: string;
       measurement?: string;
       quantity: string;
       rate: string;
@@ -221,17 +230,6 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
   });
   const [editBillLoading, setEditBillLoading] = useState(false);
 
-  // PDF Upload & Preview State (under 1 MB)
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [uploadTargetBillId, setUploadTargetBillId] = useState<string | null>(null);
-  const [uploadingBillId, setUploadingBillId] = useState<string | null>(null);
-  const [pdfPreviewModal, setPdfPreviewModal] = useState<{
-    open: boolean;
-    url: string;
-    name: string;
-    id: string;
-    billNo?: string;
-  } | null>(null);
   const [pdfToast, setPdfToast] = useState<{
     open: boolean;
     message: string;
@@ -242,20 +240,11 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
     severity: 'success',
   });
 
-  // Automatically calculate total case count from added product rows
-  useEffect(() => {
-    if (productRows.length > 0) {
-      const totalCases = productRows.reduce((acc, row) => acc + (parseFloat(row.quantity) || 0), 0);
-      setCaseCount(String(totalCases));
-    } else {
-      setCaseCount('0');
-    }
-  }, [productRows]);
-
   // Update customer when prop changes
   useEffect(() => {
     if (initialCustomerName) {
       setCurrentCustomerName(initialCustomerName);
+      setIsCustomerLocked(true);
       setFilterCustomer(initialCustomerName);
       setAddCreditCustomerName(initialCustomerName);
       const match = customerOptions.find((c) => c.name === initialCustomerName);
@@ -264,6 +253,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
       }
     } else {
       setCurrentCustomerName('');
+      setIsCustomerLocked(false);
       setFilterCustomer('');
       setAddCreditCustomerName('');
       setSelectedCustomerId('');
@@ -316,10 +306,13 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
 
         if (prodRes && prodRes.length > 0) {
           const mapped = prodRes.map((p: any) => ({
-            id: p._id || p.id,
+            id: String(p._id || p.id || ''),
             name: p.name,
             rate: p.amount ?? p.rate ?? null,
             measurement: p.measurement || '',
+            pktUnit: p.pktUnit !== undefined && p.pktUnit !== null ? String(p.pktUnit) : '',
+            companyId: p.companyId ? String(p.companyId) : null,
+            companyName: p.companyName ? String(p.companyName).trim() : '',
           }));
           setProductOptions(mapped);
         }
@@ -426,6 +419,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
       alert('Please select a customer first');
       return;
     }
+    setIsCustomerLocked(true);
     setActiveSubTab('Create Particular');
   };
 
@@ -459,15 +453,25 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
     [productOptions, savedBillMeasurements, productRows]
   );
 
+  const filteredProductOptions = useMemo(() => {
+    const selectedComp = company.trim().toLowerCase();
+    if (!selectedComp) return productOptions;
+    const matchedComp = companyOptions.find(
+      (c) => c.name.trim().toLowerCase() === selectedComp
+    );
+    const selectedCompId = matchedComp?.id ? String(matchedComp.id) : '';
+    return productOptions.filter((p) => {
+      if (selectedCompId && p.companyId && String(p.companyId) === selectedCompId) {
+        return true;
+      }
+      return (p.companyName || '').trim().toLowerCase() === selectedComp;
+    });
+  }, [productOptions, companyOptions, company]);
+
   // Product Entry keyboard flow & focus management
   const productSearchInputRef = useRef<HTMLInputElement | null>(null);
   const productMenuOpenRef = useRef(false);
-  const highlightedProductRef = useRef<{
-    id: string;
-    name: string;
-    rate?: number | null;
-    measurement?: string;
-  } | null>(null);
+  const highlightedProductRef = useRef<ProductDropdownOption | null>(null);
   const productHighlightReasonRef = useRef<string | null>(null);
   const productSearchTextRef = useRef('');
 
@@ -478,9 +482,9 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
   };
 
   const resetProductEntryInputs = () => {
+    setSelectedProductId('');
     setSelectedProduct('');
     setProductMeasurement('');
-    setQuantity('');
     setRate('');
     setPkt('');
     productMenuOpenRef.current = false;
@@ -489,14 +493,16 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
     productSearchTextRef.current = '';
   };
 
-  const selectProductOption = (
-    val: { id: string; name: string; rate?: number | null; measurement?: string } | null
-  ) => {
+  const selectProductOption = (val: ProductDropdownOption | null) => {
+    setSelectedProductId(val ? val.id : '');
     setSelectedProduct(val ? val.name : '');
-    if (val && val.rate !== undefined && val.rate !== null && Number(val.rate) > 0) {
-      setRate(String(val.rate));
-    }
+    setRate(
+      val && val.rate !== undefined && val.rate !== null && Number(val.rate) > 0
+        ? String(val.rate)
+        : ''
+    );
     setProductMeasurement(val?.measurement ? String(val.measurement) : '');
+    setPkt(val?.pktUnit ? String(val.pktUnit).trim() : '');
     highlightedProductRef.current = null;
     productHighlightReasonRef.current = null;
     productSearchTextRef.current = val ? val.name : '';
@@ -504,20 +510,26 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
 
   // Subtab 2: Product Line Addition
   const handleAddProductRow = () => {
-    if (!selectedProduct || !quantity || !rate) {
-      alert('Please select Product, enter Case and Rate');
+    if (!selectedProduct || !rate) {
+      alert('Please select Product and enter Rate');
       return;
     }
-    const caseVal = parseFloat(quantity) || 0;
-    const piecesPerCase = parseFloat(pkt) || 1;
-    const totalPieces = caseVal * piecesPerCase;
-    const lineAmt = (totalPieces * (parseFloat(rate) || 0)).toFixed(2);
+    const matchedProduct =
+      filteredProductOptions.find(
+        (p) => (selectedProductId && p.id === selectedProductId) || p.name === selectedProduct
+      ) ||
+      productOptions.find(
+        (p) => (selectedProductId && p.id === selectedProductId) || p.name === selectedProduct
+      );
+    const unitCount = parseFloat(pkt) || 1;
+    const lineAmt = (unitCount * (parseFloat(rate) || 0)).toFixed(2);
 
     const newRow: ProductRowItem = {
       id: Date.now().toString(),
       particular: selectedProduct,
+      companyName: (matchedProduct?.companyName || company || '').trim(),
       measurement: productMeasurement.trim(),
-      quantity,
+      quantity: '',
       rate,
       pktUnit: pkt ? pkt : '-',
       amount: lineAmt,
@@ -528,7 +540,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
   };
 
   const handleRemoveOrClearProductEntry = () => {
-    if (selectedProduct || productMeasurement || quantity || rate || pkt) {
+    if (selectedProduct || productMeasurement || rate || pkt) {
       resetProductEntryInputs();
       focusProductSearch();
       return;
@@ -544,7 +556,6 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
     setEditRowData({
       particular: row.particular,
       measurement: row.measurement || '',
-      quantity: row.quantity,
       rate: row.rate,
       pktUnit: row.pktUnit === '-' ? '' : row.pktUnit,
     });
@@ -552,14 +563,12 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
 
   // Save edited product row
   const handleSaveEditRow = (id: string) => {
-    if (!editRowData.particular || !editRowData.quantity || !editRowData.rate) {
-      alert('Please enter Product, Cases, and Rate');
+    if (!editRowData.particular || !editRowData.rate) {
+      alert('Please enter Product and Rate');
       return;
     }
-    const caseVal = parseFloat(editRowData.quantity) || 0;
-    const piecesPerCase = parseFloat(editRowData.pktUnit) || 1;
-    const totalPieces = caseVal * (piecesPerCase > 0 ? piecesPerCase : 1);
-    const lineAmt = (totalPieces * (parseFloat(editRowData.rate) || 0)).toFixed(2);
+    const unitCount = parseFloat(editRowData.pktUnit) || 1;
+    const lineAmt = ((unitCount > 0 ? unitCount : 1) * (parseFloat(editRowData.rate) || 0)).toFixed(2);
 
     setProductRows((prev) =>
       prev.map((row) =>
@@ -568,7 +577,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
               ...row,
               particular: editRowData.particular.trim(),
               measurement: editRowData.measurement.trim(),
-              quantity: editRowData.quantity.trim(),
+              quantity: '',
               rate: editRowData.rate.trim(),
               pktUnit: editRowData.pktUnit.trim() !== '' ? editRowData.pktUnit.trim() : '-',
               amount: lineAmt,
@@ -600,13 +609,44 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
     return parseChargeValue(packing, baseAfterDiscount).amount;
   }, [packing, subtotalAmount, discountVal]);
 
-  // Tax Calculation (Supports % like 18% on taxable base or flat ₹ amount)
-  const taxBreakdown = useMemo(() => {
-    const taxableBase = Math.max(0, subtotalAmount - discountVal + packingVal);
-    return parseChargeValue(tax, taxableBase);
-  }, [tax, subtotalAmount, discountVal, packingVal]);
+  const hasTaxPercent = tax.trim() !== '';
+  const hasTaxRupees = taxRupees.trim() !== '';
 
-  const taxVal = taxBreakdown.amount;
+  // Tax Calculation: either percentage row (%) OR flat rupees row (₹)
+  const { cleanTaxPctStr, taxPercentNum, taxPercentVal, cleanTaxRsStr, taxRupeesVal, taxVal } = useMemo(() => {
+    const taxableBase = Math.max(0, subtotalAmount - discountVal + packingVal);
+    const pctStr = tax.replace(/[^0-9.]/g, '');
+    const pctNum = parseFloat(pctStr) || 0;
+    const pctAmt = !hasTaxRupees && pctNum > 0 ? (taxableBase * pctNum) / 100 : 0;
+
+    const rsStr = taxRupees.replace(/[^0-9.]/g, '');
+    const rsAmt = !hasTaxPercent ? Math.max(0, parseFloat(rsStr) || 0) : 0;
+
+    return {
+      cleanTaxPctStr: pctStr,
+      taxPercentNum: !hasTaxRupees ? pctNum : 0,
+      taxPercentVal: pctAmt,
+      cleanTaxRsStr: rsStr,
+      taxRupeesVal: rsAmt,
+      taxVal: pctAmt + rsAmt,
+    };
+  }, [tax, taxRupees, hasTaxPercent, hasTaxRupees, subtotalAmount, discountVal, packingVal]);
+
+  const taxDisabledFieldSx = {
+    '& .MuiOutlinedInput-root.Mui-disabled': {
+      backgroundColor: '#F1F5F9',
+      pointerEvents: 'none',
+      '& .MuiOutlinedInput-notchedOutline': {
+        borderColor: '#E2E8F0',
+      },
+      '& input': {
+        WebkitTextFillColor: '#94A3B8',
+        textAlign: 'center',
+        fontSize: '16px',
+        fontWeight: 700,
+      },
+    },
+  };
 
   // Final Net Total Amount
   const finalTotalAmount = useMemo(() => {
@@ -631,15 +671,26 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
 
     try {
       setCreateLoading(true);
+      const rowCompanies = Array.from(
+        new Set(productRows.map((r) => (r.companyName || '').trim()).filter(Boolean))
+      );
+      const resolvedBillCompanyName =
+        rowCompanies.length > 0 ? rowCompanies.join(', ') : (company ? company.trim() : '');
+
+      const taxParts: string[] = [];
+      if (taxPercentNum > 0) taxParts.push(`${cleanTaxPctStr}%`);
+      if (taxRupeesVal > 0) taxParts.push(`₹${cleanTaxRsStr}`);
+      const resolvedTax = taxParts.length > 0 ? taxParts.join(' + ') : '0';
+
       const created = await ParticularsApi.create({
         customerName: currentCustomerName || 'General',
-        caseCount: caseCount || '0',
-        companyName: company ? company.trim() : '',
+        caseCount: '',
+        companyName: resolvedBillCompanyName,
         discount: discount || '0',
         transport: transport || '-',
         packing: packing || '0',
         billNo: billNo.trim(),
-        tax: tax || '0',
+        tax: resolvedTax,
         amount: subtotalAmount.toFixed(2),
         total: finalTotalAmount,
         date: date,
@@ -650,16 +701,17 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
       const createdBillData: BillPrintData = {
         billNo: assignedBillNo,
         customerName: currentCustomerName || 'General',
-        companyName: company ? company.trim() : '',
+        companyName: resolvedBillCompanyName,
         preparedBy: '',
         phone: '+91 98765 43210',
         email: 'info@simba.com',
         website: 'www.simba.com',
         transport: transport && transport.trim() !== '' && transport !== '-' ? transport.trim() : '-',
-        caseCount: caseCount || '0',
+        caseCount: '',
         date: date,
         products: productRows.map((p) => ({
           particular: p.particular,
+          companyName: p.companyName || '',
           measurement: p.measurement || '',
           quantity: p.quantity,
           rate: p.rate,
@@ -669,23 +721,23 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
         amount: subtotalAmount.toFixed(2),
         discount: discount || '0',
         packing: packing || '0',
-        tax: tax || '0',
+        tax: resolvedTax,
         total: finalTotalAmount,
       };
 
-      const successMsg = `Particular bill #${assignedBillNo}${company && company.trim() ? ` for ${company.trim()}` : ''} created successfully!`;
+      const successMsg = `Particular bill #${assignedBillNo}${resolvedBillCompanyName ? ` for ${resolvedBillCompanyName}` : ''} created successfully!`;
       alert(successMsg);
 
       setBillNo('');
       setCompany('');
-      setSelectedProduct('');
-      setProductMeasurement('');
+      resetProductEntryInputs();
+      setProductEntryKey((k) => k + 1);
       setProductRows([]);
-      setCaseCount('0');
       setDiscount('');
       setTransport('');
       setPacking('');
       setTax('');
+      setTaxRupees('');
       fetchAccounts(filterCustomer);
       fetchParticulars();
 
@@ -800,6 +852,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
       caseCount: billData.caseCount || billData.cases || (billData.products ? billData.products.reduce((acc: number, p: any) => acc + (parseFloat(p.quantity) || 0), 0) : 0),
       products: (billData.products || []).map((p: any) => ({
         particular: p.particular || p.particularName || p.name || '',
+        companyName: p.companyName || '',
         measurement: p.measurement || '',
         quantity: p.quantity || '',
         rate: p.rate || '',
@@ -841,7 +894,8 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
         date: billData.date || new Date().toISOString().split('T')[0],
         products: (billData.products || []).map((p: any) => ({
           particular: p.particular || p.particularName || p.name || 'Product',
-          quantity: String(p.quantity || '0'),
+          companyName: p.companyName || '',
+          quantity: p.quantity !== undefined && p.quantity !== null ? String(p.quantity) : '',
           rate: String(p.rate || '0'),
           pktUnit: p.pktUnit || p.pkt || '-',
           amount: String(p.amount || '0'),
@@ -893,8 +947,9 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
       products: (row.products || []).map((p: any, idx: number) => ({
         id: p._id || p.id || `edit-prod-${idx}`,
         particular: p.particular || p.particularName || p.name || '',
+        companyName: p.companyName || '',
         measurement: p.measurement || '',
-        quantity: String(p.quantity || '0'),
+        quantity: p.quantity !== undefined && p.quantity !== null ? String(p.quantity) : '',
         rate: String(p.rate || '0'),
         pktUnit: p.pktUnit || p.pkt || '-',
         amount: String(p.amount || '0'),
@@ -927,11 +982,12 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
       const updated = [...prev.products];
       const row = { ...updated[index], [field]: val };
       if (field === 'quantity' || field === 'rate' || field === 'pktUnit') {
-        const q = parseFloat(field === 'quantity' ? val : row.quantity) || 0;
+        const qtyRaw = (field === 'quantity' ? val : row.quantity).trim();
         const r = parseFloat(field === 'rate' ? val : row.rate) || 0;
         const pktStr = (field === 'pktUnit' ? val : row.pktUnit) || '';
         const pNum = parseFloat(pktStr);
         const pieces = !isNaN(pNum) && pNum > 0 ? pNum : 1;
+        const q = qtyRaw !== '' && qtyRaw !== '-' ? (parseFloat(qtyRaw) || 0) : 1;
         row.amount = (q * pieces * r).toFixed(2);
       }
       updated[index] = row;
@@ -1004,150 +1060,6 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
       alert('Error updating bill details');
     } finally {
       setEditBillLoading(false);
-    }
-  };
-
-  // Transport Receipt / PDF Upload Handlers (Up to 5 MB)
-  const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
-
-  const handleTriggerPdfUpload = (id: string) => {
-    setUploadTargetBillId(id);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-      fileInputRef.current.click();
-    }
-  };
-
-  const handlePdfFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    const targetId = uploadTargetBillId;
-    if (!file || !targetId) return;
-
-    // Reset input so same file can be selected again if needed
-    e.target.value = '';
-
-    // 1. Verify file type is Image or PDF
-    const isImageOrPdf =
-      file.type.startsWith('image/') ||
-      file.type === 'application/pdf' ||
-      /\.(jpg|jpeg|png|webp|gif|pdf)$/i.test(file.name);
-    if (!isImageOrPdf) {
-      setPdfToast({
-        open: true,
-        message: 'Invalid file format. Please upload an Image (JPG, PNG, WEBP) or PDF file.',
-        severity: 'error',
-      });
-      return;
-    }
-
-    // 2. Verify file size is under 5 MB
-    if (file.size > MAX_FILE_SIZE_BYTES) {
-      const sizeInMb = (file.size / (1024 * 1024)).toFixed(2);
-      setPdfToast({
-        open: true,
-        message: `File size (${sizeInMb} MB) exceeds 5 MB limit. Please select a smaller file.`,
-        severity: 'error',
-      });
-      return;
-    }
-
-    try {
-      setUploadingBillId(targetId);
-      const reader = new FileReader();
-      reader.onload = async () => {
-        try {
-          const base64Data = reader.result as string;
-          const uploadRes = await ParticularsApi.uploadPdf(targetId, base64Data, file.name);
-          const savedData = uploadRes?.data?.pdfData || base64Data;
-
-          // Update local state in particularDetails
-          setParticularDetails((prev) =>
-            prev.map((p) => {
-              const pId = p._id || p.id;
-              if (pId === targetId) {
-                return { ...p, pdfData: savedData, pdfName: file.name };
-              }
-              return p;
-            })
-          );
-
-          setPdfToast({
-            open: true,
-            message: `Receipt document "${file.name}" uploaded successfully!`,
-            severity: 'success',
-          });
-        } catch (uploadErr) {
-          console.error('Failed to save document to server:', uploadErr);
-          setPdfToast({
-            open: true,
-            message: 'Failed to upload receipt. Please try again.',
-            severity: 'error',
-          });
-        } finally {
-          setUploadingBillId(null);
-        }
-      };
-
-      reader.onerror = () => {
-        setUploadingBillId(null);
-        setPdfToast({
-          open: true,
-          message: 'Error reading file.',
-          severity: 'error',
-        });
-      };
-
-      reader.readAsDataURL(file);
-    } catch (err) {
-      console.error('Failed to initiate upload:', err);
-      setUploadingBillId(null);
-    }
-  };
-
-  const handleOpenPdfPreview = (row: any) => {
-    const rowId = row._id || row.id || '';
-    if (!row.pdfData) {
-      handleTriggerPdfUpload(rowId);
-      return;
-    }
-
-    setPdfPreviewModal({
-      open: true,
-      url: row.pdfData,
-      name: row.pdfName || `Bill-${row.billNo || 'document'}.pdf`,
-      id: rowId,
-      billNo: row.billNo,
-    });
-  };
-
-  const handleDeleteAttachedPdf = async (id: string) => {
-    if (!window.confirm('Are you sure you want to remove the attached PDF from this bill?')) return;
-    try {
-      await ParticularsApi.deletePdf(id);
-      setParticularDetails((prev) =>
-        prev.map((p) => {
-          const pId = p._id || p.id;
-          if (pId === id) {
-            return { ...p, pdfData: '', pdfName: '' };
-          }
-          return p;
-        })
-      );
-      if (pdfPreviewModal?.id === id) {
-        setPdfPreviewModal(null);
-      }
-      setPdfToast({
-        open: true,
-        message: 'Attached PDF deleted successfully.',
-        severity: 'success',
-      });
-    } catch (err) {
-      console.error('Failed to delete attached PDF:', err);
-      setPdfToast({
-        open: true,
-        message: 'Failed to delete attached PDF.',
-        severity: 'error',
-      });
     }
   };
 
@@ -1296,12 +1208,14 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                     if (val) {
                       setSelectedCustomerId(val.id);
                       setCurrentCustomerName(val.name);
+                      setIsCustomerLocked(true);
                       setFilterCustomer(val.name);
                       setAddCreditCustomerName(val.name);
                       localStorage.setItem('simba_active_customer', val.name);
                     } else {
                       setSelectedCustomerId('');
                       setCurrentCustomerName('');
+                      setIsCustomerLocked(false);
                       setFilterCustomer('');
                       setAddCreditCustomerName('');
                       localStorage.removeItem('simba_active_customer');
@@ -1429,30 +1343,110 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                 <Typography sx={{ fontSize: '12px', fontWeight: 600, color: '#475569', mb: 0.6 }}>
                   Customer *
                 </Typography>
+                {isCustomerLocked && currentCustomerName ? (
+                  <TextField
+                    fullWidth
+                    size="small"
+                    value={currentCustomerName}
+                    disabled
+                    sx={{
+                      backgroundColor: '#FFFFFF',
+                      borderRadius: '6px',
+                      '& .MuiOutlinedInput-root': {
+                        height: '38px',
+                        borderRadius: '6px',
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        '& fieldset': {
+                          borderColor: '#CBD5E1',
+                        },
+                        '&.Mui-disabled fieldset': {
+                          borderColor: '#CBD5E1',
+                        },
+                      },
+                      '& .MuiInputBase-input.Mui-disabled': {
+                        WebkitTextFillColor: '#0F172A',
+                        color: '#0F172A',
+                        cursor: 'default',
+                      },
+                    }}
+                  />
+                ) : (
+                  <Autocomplete
+                    fullWidth
+                    size="small"
+                    autoHighlight
+                    options={customerOptions}
+                    getOptionLabel={(option) => (typeof option === 'string' ? option : option.name || '')}
+                    isOptionEqualToValue={(option, val) => option.id === val.id || option.name === val.name}
+                    value={customerOptions.find((c) => c.name === currentCustomerName) || null}
+                    onChange={(_, val) => {
+                      const name = val ? val.name : '';
+                      setCurrentCustomerName(name);
+                      localStorage.setItem('simba_active_customer', name);
+                      if (val) {
+                        setSelectedCustomerId(val.id);
+                        setFilterCustomer(val.name);
+                        setAddCreditCustomerName(val.name);
+                      } else {
+                        setSelectedCustomerId('');
+                      }
+                    }}
+                    renderInput={(params) => (
+                      <TextField
+                        {...params}
+                        placeholder="Search Customer..."
+                        sx={{
+                          backgroundColor: '#FFFFFF',
+                          borderRadius: '6px',
+                          '& .MuiOutlinedInput-root': {
+                            height: '38px',
+                            borderRadius: '6px',
+                            fontSize: '13px',
+                            fontWeight: 600,
+                            color: '#0F172A',
+                            '& fieldset': {
+                              borderColor: '#CBD5E1',
+                            },
+                            '&:hover fieldset': {
+                              borderColor: '#94A3B8',
+                            },
+                            '&.Mui-focused fieldset': {
+                              borderColor: '#0B4DB7',
+                              borderWidth: '1.5px',
+                            },
+                          },
+                        }}
+                      />
+                    )}
+                  />
+                )}
+              </Box>
+
+              {/* Company Name */}
+              <Box>
+                <Typography sx={{ fontSize: '12px', fontWeight: 600, color: '#475569', mb: 0.6 }}>
+                  Company Name
+                </Typography>
                 <Autocomplete
                   fullWidth
                   size="small"
+                  openOnFocus
                   autoHighlight
-                  options={customerOptions}
+                  options={companyOptions}
                   getOptionLabel={(option) => (typeof option === 'string' ? option : option.name || '')}
                   isOptionEqualToValue={(option, val) => option.id === val.id || option.name === val.name}
-                  value={customerOptions.find((c) => c.name === currentCustomerName) || null}
+                  value={companyOptions.find((c) => c.name === company) || null}
                   onChange={(_, val) => {
-                    const name = val ? val.name : '';
-                    setCurrentCustomerName(name);
-                    localStorage.setItem('simba_active_customer', name);
-                    if (val) {
-                      setSelectedCustomerId(val.id);
-                      setFilterCustomer(val.name);
-                      setAddCreditCustomerName(val.name);
-                    } else {
-                      setSelectedCustomerId('');
-                    }
+                    const nextCompany = val ? val.name : '';
+                    setCompany(nextCompany);
+                    resetProductEntryInputs();
+                    setProductEntryKey((k) => k + 1);
                   }}
                   renderInput={(params) => (
                     <TextField
                       {...params}
-                      placeholder="Search Customer..."
+                      placeholder="Select Company..."
                       sx={{
                         backgroundColor: '#FFFFFF',
                         borderRadius: '6px',
@@ -1583,13 +1577,19 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
               }}
             >
               <Autocomplete
+                key={productEntryKey}
                 size="small"
                 autoHighlight
                 sx={{ flex: { xs: '1 1 100%', md: 2.5 }, minWidth: '170px' }}
-                options={productOptions}
+                options={filteredProductOptions}
+                noOptionsText={company ? `No products found for "${company}"` : 'No products available'}
                 getOptionLabel={(option) => (typeof option === 'string' ? option : option.name || '')}
-                isOptionEqualToValue={(option, val) => option.id === val.id || option.name === val.name}
-                value={productOptions.find((p) => p.name === selectedProduct) || null}
+                isOptionEqualToValue={(option, val) => option.id === val.id}
+                value={
+                  filteredProductOptions.find((p) =>
+                    selectedProductId ? p.id === selectedProductId : p.name === selectedProduct
+                  ) || null
+                }
                 onOpen={() => {
                   productMenuOpenRef.current = true;
                 }}
@@ -1610,11 +1610,52 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                 onChange={(_, val) => {
                   selectProductOption(val);
                 }}
+                renderOption={(props, option) => {
+                  const { key, ...restProps } = props;
+                  return (
+                    <Box
+                      component="li"
+                      key={option.id || key}
+                      {...restProps}
+                      sx={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 1,
+                        width: '100%',
+                      }}
+                    >
+                      <Typography sx={{ fontSize: '13px', fontWeight: 600, color: '#0F172A' }}>
+                        {option.name}
+                      </Typography>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexShrink: 0 }}>
+                        {option.rate !== undefined && option.rate !== null && Number(option.rate) > 0 && (
+                          <Typography sx={{ fontSize: '12px', fontWeight: 700, color: '#0B4DB7' }}>
+                            ₹{Number(option.rate).toLocaleString('en-IN')}
+                          </Typography>
+                        )}
+                        {!company && option.companyName && (
+                          <Chip
+                            label={option.companyName}
+                            size="small"
+                            sx={{
+                              height: '18px',
+                              fontSize: '10.5px',
+                              fontWeight: 700,
+                              backgroundColor: '#F1F5F9',
+                              color: '#475569',
+                            }}
+                          />
+                        )}
+                      </Box>
+                    </Box>
+                  );
+                }}
                 renderInput={(params) => (
                   <TextField
                     {...params}
                     inputRef={productSearchInputRef}
-                    placeholder="Search Product..."
+                    placeholder={company ? `Search ${company} Product...` : 'Search Product...'}
                     onKeyDown={(e) => {
                       if (e.key === 'Tab' && !e.shiftKey && productMenuOpenRef.current) {
                         const typedQuery = productSearchTextRef.current.trim().toLowerCase();
@@ -1624,10 +1665,10 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                         if (shouldAutoPick) {
                           const target =
                             highlightedProductRef.current ||
-                            productOptions.find((p) => p.name.toLowerCase().startsWith(typedQuery)) ||
-                            productOptions.find((p) => p.name.toLowerCase().includes(typedQuery)) ||
+                            filteredProductOptions.find((p) => p.name.toLowerCase().startsWith(typedQuery)) ||
+                            filteredProductOptions.find((p) => p.name.toLowerCase().includes(typedQuery)) ||
                             null;
-                          if (target && target.name !== selectedProduct) {
+                          if (target && target.id !== selectedProductId) {
                             selectProductOption(target);
                           }
                         }
@@ -1672,24 +1713,6 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
 
               <TextField
                 size="small"
-                placeholder="Case"
-                type="number"
-                value={quantity}
-                onChange={(e) => setQuantity(e.target.value)}
-                sx={{
-                  flex: { xs: '1 1 45%', md: 1 },
-                  '& .MuiOutlinedInput-root': {
-                    height: '36px',
-                    fontSize: '13px',
-                    fontWeight: 500,
-                    borderRadius: '6px',
-                    '& .MuiOutlinedInput-notchedOutline': { borderColor: '#CBD5E1' },
-                  },
-                }}
-              />
-
-              <TextField
-                size="small"
                 placeholder="Rate"
                 type="number"
                 value={rate}
@@ -1728,8 +1751,8 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                 size="small"
                 placeholder="Amount"
                 value={
-                  quantity && rate
-                    ? (((parseFloat(quantity) || 0) * (parseFloat(pkt) || 1)) * (parseFloat(rate) || 0)).toFixed(2)
+                  rate
+                    ? ((parseFloat(pkt) || 1) * (parseFloat(rate) || 0)).toFixed(2)
                     : ''
                 }
                 slotProps={{
@@ -1817,7 +1840,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                         textAlign: 'center',
                         borderBottom: '1px solid #E2E8F0',
                         borderRight: '1px solid #E2E8F0',
-                        width: '26%',
+                        width: '30%',
                       }}
                     >
                       PARTICULAR
@@ -1833,7 +1856,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                         textAlign: 'center',
                         borderBottom: '1px solid #E2E8F0',
                         borderRight: '1px solid #E2E8F0',
-                        width: '12%',
+                        width: '14%',
                       }}
                     >
                       MEASUREMENT
@@ -1849,23 +1872,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                         textAlign: 'center',
                         borderBottom: '1px solid #E2E8F0',
                         borderRight: '1px solid #E2E8F0',
-                        width: '11%',
-                      }}
-                    >
-                      CASE
-                    </TableCell>
-                    <TableCell
-                      sx={{
-                        py: 1.4,
-                        px: 1.5,
-                        fontSize: '11.5px',
-                        fontWeight: 700,
-                        color: '#1E293B',
-                        letterSpacing: '0.04em',
-                        textAlign: 'center',
-                        borderBottom: '1px solid #E2E8F0',
-                        borderRight: '1px solid #E2E8F0',
-                        width: '12%',
+                        width: '14%',
                       }}
                     >
                       RATE
@@ -1881,7 +1888,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                         textAlign: 'center',
                         borderBottom: '1px solid #E2E8F0',
                         borderRight: '1px solid #E2E8F0',
-                        width: '13%',
+                        width: '14%',
                       }}
                     >
                       PKT / UNITS
@@ -1897,7 +1904,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                         textAlign: 'center',
                         borderBottom: '1px solid #E2E8F0',
                         borderRight: '1px solid #E2E8F0',
-                        width: '13%',
+                        width: '15%',
                       }}
                     >
                       AMOUNT
@@ -1925,7 +1932,6 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                       const isEditing = editingRowId === row.id;
                       const liveAmount = isEditing
                         ? (
-                            (parseFloat(editRowData.quantity) || 0) *
                             (parseFloat(editRowData.pktUnit) || 1) *
                             (parseFloat(editRowData.rate) || 0)
                           ).toFixed(2)
@@ -1990,7 +1996,25 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                                 sx={{ minWidth: '140px' }}
                               />
                             ) : (
-                              row.particular
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.8, flexWrap: 'wrap' }}>
+                                <Typography component="span" sx={{ fontSize: '13px', fontWeight: 600, color: '#0F172A' }}>
+                                  {row.particular}
+                                </Typography>
+                                {row.companyName && (
+                                  <Chip
+                                    label={row.companyName}
+                                    size="small"
+                                    sx={{
+                                      height: '20px',
+                                      fontSize: '10.5px',
+                                      fontWeight: 700,
+                                      backgroundColor: '#F1F5F9',
+                                      color: '#475569',
+                                      border: '1px solid #E2E8F0',
+                                    }}
+                                  />
+                                )}
+                              </Box>
                             )}
                           </TableCell>
 
@@ -2033,50 +2057,6 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                               />
                             ) : (
                               '-'
-                            )}
-                          </TableCell>
-
-                          <TableCell
-                            align="center"
-                            sx={{
-                              borderBottom: '1px solid #E2E8F0',
-                              borderRight: '1px solid #E2E8F0',
-                              fontWeight: 600,
-                              fontSize: '13px',
-                              py: isEditing ? 0.8 : 1.2,
-                            }}
-                          >
-                            {isEditing ? (
-                              <TextField
-                                size="small"
-                                type="number"
-                                value={editRowData.quantity}
-                                onChange={(e) =>
-                                  setEditRowData((prev) => ({ ...prev, quantity: e.target.value }))
-                                }
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    e.preventDefault();
-                                    handleSaveEditRow(row.id);
-                                  } else if (e.key === 'Escape') {
-                                    handleCancelEditRow();
-                                  }
-                                }}
-                                slotProps={{
-                                  input: {
-                                    sx: {
-                                      fontSize: '13px',
-                                      fontWeight: 700,
-                                      textAlign: 'center',
-                                      backgroundColor: '#FFFFFF',
-                                      '& input': { textAlign: 'center', py: 0.5, px: 0.5 },
-                                    },
-                                  },
-                                }}
-                                sx={{ width: '80px' }}
-                              />
-                            ) : (
-                              row.quantity
                             )}
                           </TableCell>
 
@@ -2223,7 +2203,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                               </Box>
                             ) : (
                               <Box sx={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 0.6 }}>
-                                <Tooltip title="Edit Product Item (Cases, Rate, Pkt/Unit)" arrow>
+                                <Tooltip title="Edit Product Item (Rate, Pkt/Unit)" arrow>
                                   <IconButton
                                     size="small"
                                     onClick={() => handleStartEditRow(row)}
@@ -2271,7 +2251,6 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                         <TableCell sx={{ borderBottom: '1px solid #E2E8F0', borderRight: '1px solid #E2E8F0' }} />
                         <TableCell sx={{ borderBottom: '1px solid #E2E8F0', borderRight: '1px solid #E2E8F0' }} />
                         <TableCell sx={{ borderBottom: '1px solid #E2E8F0', borderRight: '1px solid #E2E8F0' }} />
-                        <TableCell sx={{ borderBottom: '1px solid #E2E8F0', borderRight: '1px solid #E2E8F0' }} />
                         <TableCell sx={{ borderBottom: '1px solid #E2E8F0' }} />
                       </TableRow>
                     </>
@@ -2302,18 +2281,6 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                     color: '#334155',
                     backgroundColor: '#FFFFFF',
                     border: '1px solid #CBD5E1',
-                    borderRadius: '16px',
-                  }}
-                />
-                <Chip
-                  label={`Total Cases: ${caseCount || '0'} Cases`}
-                  sx={{
-                    height: '30px',
-                    fontSize: '12px',
-                    fontWeight: 700,
-                    color: '#0B4DB7',
-                    backgroundColor: '#EFF6FF',
-                    border: '1px solid #BFDBFE',
                     borderRadius: '16px',
                   }}
                 />
@@ -2428,7 +2395,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                   </Typography>
                 </Box>
 
-                {/* Tax */}
+                {/* Tax (%) */}
                 <Box
                   sx={{
                     display: 'grid',
@@ -2438,44 +2405,136 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                   }}
                 >
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.7 }}>
-                    <Typography sx={{ fontSize: '12.5px', fontWeight: 600, color: '#475569' }}>
-                      Tax:
+                    <Typography
+                      sx={{
+                        fontSize: '12.5px',
+                        fontWeight: 600,
+                        color: hasTaxRupees ? '#94A3B8' : '#475569',
+                      }}
+                    >
+                      Tax (%):
                     </Typography>
-                    <Typography sx={{ fontSize: '12px', fontWeight: 700, color: '#16A34A' }}>
-                      {taxBreakdown.num > 0
-                        ? taxBreakdown.isPercent
-                          ? `${taxBreakdown.cleanNum}%`
-                          : `₹${taxBreakdown.num.toLocaleString('en-IN')}`
-                        : '18%'}
-                    </Typography>
+                    {taxPercentNum > 0 && (
+                      <Typography sx={{ fontSize: '12px', fontWeight: 700, color: '#16A34A' }}>
+                        {cleanTaxPctStr}%
+                      </Typography>
+                    )}
                   </Box>
-                  <TextField
-                    size="small"
-                    placeholder="e.g. 18%"
-                    value={tax}
-                    onChange={(e) => setTax(e.target.value)}
-                    slotProps={{
-                      input: {
-                        sx: {
-                          height: '32px',
-                          fontSize: '12.5px',
-                          fontWeight: 500,
-                          borderRadius: '6px',
-                          backgroundColor: '#FFFFFF',
-                        },
-                      },
-                    }}
-                  />
+                  <Tooltip title={hasTaxRupees ? 'Clear Tax (₹) to enter Tax (%)' : ''} arrow>
+                    <Box
+                      component="span"
+                      sx={{
+                        display: 'block',
+                        cursor: hasTaxRupees ? 'not-allowed' : undefined,
+                      }}
+                    >
+                      <TextField
+                        fullWidth
+                        size="small"
+                        disabled={hasTaxRupees}
+                        placeholder="e.g. 18%"
+                        value={hasTaxRupees ? '⊗' : tax}
+                        onChange={(e) => {
+                          const nextVal = e.target.value;
+                          setTax(nextVal);
+                          if (nextVal.trim() !== '' && taxRupees !== '') {
+                            setTaxRupees('');
+                          }
+                        }}
+                        sx={taxDisabledFieldSx}
+                        slotProps={{
+                          input: {
+                            sx: {
+                              height: '32px',
+                              fontSize: '12.5px',
+                              fontWeight: 500,
+                              borderRadius: '6px',
+                              backgroundColor: hasTaxRupees ? '#F1F5F9' : '#FFFFFF',
+                            },
+                          },
+                        }}
+                      />
+                    </Box>
+                  </Tooltip>
                   <Typography
                     sx={{
                       fontSize: '13px',
                       fontWeight: 700,
-                      color: '#16A34A',
+                      color: hasTaxRupees ? '#94A3B8' : '#16A34A',
                       minWidth: '64px',
                       textAlign: 'right',
                     }}
                   >
-                    ₹{taxVal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    ₹{taxPercentVal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </Typography>
+                </Box>
+
+                {/* Tax (₹) */}
+                <Box
+                  sx={{
+                    display: 'grid',
+                    gridTemplateColumns: '125px 1fr auto',
+                    alignItems: 'center',
+                    gap: 1.2,
+                  }}
+                >
+                  <Typography
+                    sx={{
+                      fontSize: '12.5px',
+                      fontWeight: 600,
+                      color: hasTaxPercent ? '#94A3B8' : '#475569',
+                    }}
+                  >
+                    Tax (₹):
+                  </Typography>
+                  <Tooltip title={hasTaxPercent ? 'Clear Tax (%) to enter Tax (₹)' : ''} arrow>
+                    <Box
+                      component="span"
+                      sx={{
+                        display: 'block',
+                        cursor: hasTaxPercent ? 'not-allowed' : undefined,
+                      }}
+                    >
+                      <TextField
+                        fullWidth
+                        size="small"
+                        type={hasTaxPercent ? 'text' : 'number'}
+                        disabled={hasTaxPercent}
+                        placeholder="e.g. 500"
+                        value={hasTaxPercent ? '⊗' : taxRupees}
+                        onChange={(e) => {
+                          const nextVal = e.target.value;
+                          setTaxRupees(nextVal);
+                          if (nextVal.trim() !== '' && tax !== '') {
+                            setTax('');
+                          }
+                        }}
+                        sx={taxDisabledFieldSx}
+                        slotProps={{
+                          htmlInput: hasTaxPercent ? undefined : { min: 0, step: 'any' },
+                          input: {
+                            sx: {
+                              height: '32px',
+                              fontSize: '12.5px',
+                              fontWeight: 500,
+                              borderRadius: '6px',
+                              backgroundColor: hasTaxPercent ? '#F1F5F9' : '#FFFFFF',
+                            },
+                          },
+                        }}
+                      />
+                    </Box>
+                  </Tooltip>
+                  <Typography
+                    sx={{
+                      fontSize: '13px',
+                      fontWeight: 700,
+                      color: hasTaxPercent ? '#94A3B8' : '#16A34A',
+                      minWidth: '64px',
+                      textAlign: 'right',
+                    }}
+                  >
+                    ₹{taxRupeesVal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </Typography>
                 </Box>
 
@@ -3163,7 +3222,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                   <TableCell align="center" sx={{ py: 1.4, px: 1.5, fontSize: '11.5px', fontWeight: 700, color: '#1E293B', letterSpacing: '0.04em', borderBottom: '1px solid #E2E8F0', borderRight: '1px solid #E2E8F0', width: '120px' }}>
                     TRANSPORT
                   </TableCell>
-                  <TableCell align="center" sx={{ py: 1.4, px: 1.5, fontSize: '11.5px', fontWeight: 700, color: '#1E293B', letterSpacing: '0.04em', borderBottom: '1px solid #E2E8F0', width: '175px' }}>
+                  <TableCell align="center" sx={{ py: 1.4, px: 1.5, fontSize: '11.5px', fontWeight: 700, color: '#1E293B', letterSpacing: '0.04em', borderBottom: '1px solid #E2E8F0', width: '150px' }}>
                     ACTION
                   </TableCell>
                 </TableRow>
@@ -3190,8 +3249,6 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                     const discStr = formatChargeDisplay(row.discount);
                     const packStr = formatChargeDisplay(row.packing);
                     const taxStr = formatChargeDisplay(row.tax);
-                    const hasPdf = Boolean(row.pdfData && row.pdfData.trim() !== '');
-                    const isUploading = uploadingBillId === rowId;
 
                     return (
                       <TableRow
@@ -3304,40 +3361,6 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                                 }}
                               >
                                 <ModeEditOutlineRoundedIcon sx={{ fontSize: 14 }} />
-                              </IconButton>
-                            </Tooltip>
-
-                            {/* PDF Upload / View Button (Under 1 MB) */}
-                            <Tooltip
-                              title={
-                                hasPdf
-                                  ? `View PDF (${row.pdfName || 'Attached Document'})`
-                                  : 'Upload PDF (Under 1 MB)'
-                              }
-                              arrow
-                            >
-                              <IconButton
-                                size="small"
-                                onClick={() => (hasPdf ? handleOpenPdfPreview(row) : handleTriggerPdfUpload(rowId))}
-                                disabled={isUploading}
-                                sx={{
-                                  backgroundColor: hasPdf ? '#16A34A' : '#6366F1',
-                                  color: '#FFFFFF',
-                                  borderRadius: '4px',
-                                  width: '24px',
-                                  height: '22px',
-                                  p: 0,
-                                  '&:hover': { backgroundColor: hasPdf ? '#15803D' : '#4F46E5' },
-                                  '&.Mui-disabled': { backgroundColor: '#CBD5E1', color: '#FFFFFF' },
-                                }}
-                              >
-                                {isUploading ? (
-                                  <CircularProgress size={12} sx={{ color: '#FFFFFF' }} />
-                                ) : hasPdf ? (
-                                  <PictureAsPdfRoundedIcon sx={{ fontSize: 14 }} />
-                                ) : (
-                                  <UploadFileRoundedIcon sx={{ fontSize: 14 }} />
-                                )}
                               </IconButton>
                             </Tooltip>
 
@@ -3707,202 +3730,6 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
           </Paper>
         </Box>
       )}
-      {/* Hidden File Input for PDF Upload (Under 1 MB) */}
-      <input
-        type="file"
-        ref={fileInputRef}
-        accept="application/pdf"
-        style={{ display: 'none' }}
-        onChange={handlePdfFileChange}
-      />
-
-      {/* PDF Document Preview & Management Modal */}
-      <Dialog
-        open={Boolean(pdfPreviewModal?.open)}
-        onClose={() => setPdfPreviewModal(null)}
-        maxWidth="md"
-        fullWidth
-        slotProps={{
-          paper: {
-            sx: {
-              borderRadius: '12px',
-              overflow: 'hidden',
-              height: '80vh',
-              display: 'flex',
-              flexDirection: 'column',
-            },
-          },
-        }}
-      >
-        <DialogTitle
-          sx={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            backgroundColor: '#0B4DB7',
-            color: '#FFFFFF',
-            py: 1.5,
-            px: 2.5,
-          }}
-        >
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <PictureAsPdfRoundedIcon sx={{ fontSize: 22, color: '#FFFFFF' }} />
-            <Typography sx={{ fontSize: '15px', fontWeight: 700, color: '#FFFFFF' }}>
-              {pdfPreviewModal?.name || 'Attached PDF Document'}
-            </Typography>
-            {pdfPreviewModal?.billNo && (
-              <Chip
-                label={`Bill #${pdfPreviewModal.billNo}`}
-                size="small"
-                sx={{
-                  backgroundColor: 'rgba(255, 255, 255, 0.2)',
-                  color: '#FFFFFF',
-                  fontWeight: 600,
-                  fontSize: '11px',
-                  height: '20px',
-                }}
-              />
-            )}
-          </Box>
-          <IconButton
-            size="small"
-            onClick={() => setPdfPreviewModal(null)}
-            sx={{ color: '#FFFFFF', '&:hover': { backgroundColor: 'rgba(255,255,255,0.1)' } }}
-          >
-            <CloseRoundedIcon sx={{ fontSize: 20 }} />
-          </IconButton>
-        </DialogTitle>
-
-        <DialogContent sx={{ p: 0, flex: 1, backgroundColor: '#F1F5F9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          {pdfPreviewModal?.url ? (
-            pdfPreviewModal.url.startsWith('data:image') || pdfPreviewModal.url.match(/\.(jpeg|jpg|png|webp|gif)$/i) || !pdfPreviewModal.url.includes('application/pdf') ? (
-              <Box sx={{ p: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%', overflow: 'auto' }}>
-                <img
-                  src={pdfPreviewModal.url}
-                  alt={pdfPreviewModal.name || 'Document'}
-                  style={{
-                    maxWidth: '100%',
-                    maxHeight: '100%',
-                    objectFit: 'contain',
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                    borderRadius: '6px',
-                  }}
-                />
-              </Box>
-            ) : (
-              <iframe
-                src={pdfPreviewModal.url}
-                title="PDF Preview"
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  border: 'none',
-                  display: 'block',
-                }}
-              />
-            )
-          ) : (
-            <Box
-              sx={{
-                height: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#64748B',
-              }}
-            >
-              <Typography>No document available</Typography>
-            </Box>
-          )}
-        </DialogContent>
-
-        <DialogActions
-          sx={{
-            px: 2.5,
-            py: 1.5,
-            backgroundColor: '#FFFFFF',
-            borderTop: '1px solid #E2E8F0',
-            justifyContent: 'space-between',
-          }}
-        >
-          <Button
-            variant="outlined"
-            color="error"
-            size="small"
-            startIcon={<DeleteOutlineRoundedIcon sx={{ fontSize: 16 }} />}
-            onClick={() => pdfPreviewModal?.id && handleDeleteAttachedPdf(pdfPreviewModal.id)}
-            sx={{
-              textTransform: 'none',
-              fontWeight: 600,
-              fontSize: '12.5px',
-              borderRadius: '6px',
-            }}
-          >
-            Delete Document
-          </Button>
-
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.2, flexWrap: 'wrap' }}>
-            <Button
-              variant="outlined"
-              size="small"
-              startIcon={<UploadFileRoundedIcon sx={{ fontSize: 16 }} />}
-              onClick={() => pdfPreviewModal?.id && handleTriggerPdfUpload(pdfPreviewModal.id)}
-              sx={{
-                textTransform: 'none',
-                fontWeight: 600,
-                fontSize: '12.5px',
-                borderRadius: '6px',
-              }}
-            >
-              Change / Re-upload
-            </Button>
-
-            <Button
-              variant="outlined"
-              size="small"
-              startIcon={<OpenInNewRoundedIcon sx={{ fontSize: 16 }} />}
-              component="a"
-              href={pdfPreviewModal?.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              sx={{
-                textTransform: 'none',
-                fontWeight: 600,
-                fontSize: '12.5px',
-                borderRadius: '6px',
-                color: '#475569',
-                borderColor: '#CBD5E1',
-              }}
-            >
-              Open in New Tab
-            </Button>
-
-            <Button
-              variant="contained"
-              disableElevation
-              size="small"
-              startIcon={<DownloadRoundedIcon sx={{ fontSize: 16 }} />}
-              component="a"
-              href={pdfPreviewModal?.url}
-              download={pdfPreviewModal?.name || 'bill-receipt'}
-              target="_blank"
-              rel="noopener noreferrer"
-              sx={{
-                backgroundColor: '#0B4DB7',
-                color: '#FFFFFF',
-                textTransform: 'none',
-                fontWeight: 700,
-                fontSize: '12.5px',
-                borderRadius: '6px',
-                '&:hover': { backgroundColor: '#083B8D' },
-              }}
-            >
-              Download
-            </Button>
-          </Box>
-        </DialogActions>
-      </Dialog>
-
       {/* Bill Print & Preview Modal */}
       <BillPrintModal
         open={printModalOpen}
@@ -4337,15 +4164,6 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
           </Button>
         </DialogActions>
       </Dialog>
-
-      {/* Hidden File Input for Transport / Godown Receipt Upload */}
-      <input
-        type="file"
-        ref={fileInputRef}
-        accept="image/*,application/pdf"
-        style={{ display: 'none' }}
-        onChange={handlePdfFileChange}
-      />
     </Box>
   );
 };

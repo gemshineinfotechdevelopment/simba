@@ -107,6 +107,8 @@ export const ProductsApi = {
   getAll: () => request<any[]>('/products'),
   getById: (id: string) => request<any>(`/products/${id}`),
   create: (data: any) => request<any>('/products', { method: 'POST', body: JSON.stringify(data) }),
+  bulkCreate: (data: { companyId?: string; companyName: string; products: any[] }) =>
+    request<any>('/products/bulk', { method: 'POST', body: JSON.stringify(data) }),
   update: (id: string, data: any) => request<any>(`/products/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: string) => request<any>(`/products/${id}`, { method: 'DELETE' }),
 };

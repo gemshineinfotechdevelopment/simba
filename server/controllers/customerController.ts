@@ -243,13 +243,17 @@ export const getCustomerById = async (req: Request, res: Response, next: NextFun
 
 export const createCustomer = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { name, mobile, address, gst, idCode } = req.body;
-    const normalizedMobile = mobile ? String(mobile).trim() : 'N/A';
+    const { name, mobile, address, gst, taxIdType, state, idCode } = req.body;
+    const normalizedMobile = mobile ? String(mobile).replace(/\D/g, '') : '';
 
-    if (normalizedMobile !== 'N/A' && !/^\d{10}$/.test(normalizedMobile)) {
-      res.status(400).json({ success: false, error: 'Mobile number must be exactly 10 digits' });
+    if (!/^\d{10}$/.test(normalizedMobile)) {
+      res.status(400).json({ success: false, error: 'Valid 10-digit mobile number is required' });
       return;
     }
+
+    const rawProofType = String(taxIdType || 'GSTIN').trim().toUpperCase();
+    const normalizedProofType =
+      rawProofType === 'PAN' || rawProofType === 'AADHAAR' ? rawProofType : 'GSTIN';
 
     const finalIdCode = await getNextCustomerIdCode(idCode);
 
@@ -258,6 +262,8 @@ export const createCustomer = async (req: Request, res: Response, next: NextFunc
       mobile: normalizedMobile,
       address,
       gst,
+      taxIdType: normalizedProofType,
+      state: state ? String(state).trim() : '',
       idCode: finalIdCode,
     });
     res.status(201).json({ success: true, data: customer });
@@ -274,6 +280,15 @@ export const updateCustomer = async (req: Request, res: Response, next: NextFunc
       return;
     }
     const oldName = oldCustomer.name;
+
+    if (req.body.mobile !== undefined) {
+      const normalizedMobile = String(req.body.mobile).replace(/\D/g, '');
+      if (!/^\d{10}$/.test(normalizedMobile)) {
+        res.status(400).json({ success: false, error: 'Valid 10-digit mobile number is required' });
+        return;
+      }
+      req.body.mobile = normalizedMobile;
+    }
 
     if (req.body.idCode) {
       req.body.idCode = await getNextCustomerIdCode(req.body.idCode, String(req.params.id));

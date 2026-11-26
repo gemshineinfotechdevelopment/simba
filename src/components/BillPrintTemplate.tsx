@@ -1,8 +1,9 @@
 import React from 'react';
-import { calculateBillCharges } from '../utils/chargeUtils';
+import { calculateBillCharges, formatChargeDisplay } from '../utils/chargeUtils';
 
 export interface BillPrintProduct {
   particular: string;
+  companyName?: string;
   quantity: string | number;
   rate: string | number;
   pktUnit: string | number;
@@ -67,8 +68,10 @@ export const BillPrintTemplate: React.FC<BillPrintTemplateProps> = ({ bill }) =>
         : `Packing Charges (₹${packingParsed.num.toLocaleString('en-IN')})`
       : 'Packing Charges';
 
-  const taxLabel =
-    taxParsed.num > 0
+  const rawTaxStr = String(bill.tax ?? '').trim();
+  const taxLabel = rawTaxStr.includes('+')
+    ? `Tax (${formatChargeDisplay(rawTaxStr)})`
+    : taxParsed.num > 0
       ? taxParsed.isPercent
         ? `Tax (${taxParsed.cleanNum}%)`
         : `Tax Amount (₹${taxParsed.num.toLocaleString('en-IN')})`
@@ -83,6 +86,18 @@ export const BillPrintTemplate: React.FC<BillPrintTemplateProps> = ({ bill }) =>
   const computedCases = bill.caseCount !== undefined && bill.caseCount !== ''
     ? bill.caseCount
     : (bill.products || []).reduce((acc, p) => acc + (parseFloat(String(p.quantity)) || 0), 0);
+
+  const hasCaseData =
+    (parseFloat(String(bill.caseCount || 0)) > 0) ||
+    (bill.products || []).some((p) => {
+      const q = String(p.quantity ?? '').trim();
+      return q !== '' && q !== '-' && parseFloat(q) > 0;
+    });
+
+  const hasMixedCompanies =
+    new Set(
+      (bill.products || []).map((p) => (p.companyName || '').trim().toLowerCase()).filter(Boolean)
+    ).size > 1;
 
   const transportName = bill.transport && bill.transport.trim() !== '' && bill.transport !== '-' ? bill.transport.trim() : '-';
 
@@ -166,10 +181,12 @@ export const BillPrintTemplate: React.FC<BillPrintTemplateProps> = ({ bill }) =>
             <span style={{ width: '100px', color: '#64748B', fontWeight: 600, fontSize: '12px' }}>Date:</span>
             <strong style={{ color: '#0F172A' }}>{bill.date || '-'}</strong>
           </div>
-          <div style={{ display: 'flex', marginBottom: '4px' }}>
-            <span style={{ width: '100px', color: '#64748B', fontWeight: 600, fontSize: '12px' }}>Total Cases:</span>
-            <strong style={{ color: '#0B4DB7', fontSize: '13.5px' }}>{computedCases}</strong>
-          </div>
+          {hasCaseData && (
+            <div style={{ display: 'flex', marginBottom: '4px' }}>
+              <span style={{ width: '100px', color: '#64748B', fontWeight: 600, fontSize: '12px' }}>Total Cases:</span>
+              <strong style={{ color: '#0B4DB7', fontSize: '13.5px' }}>{computedCases}</strong>
+            </div>
+          )}
           <div style={{ display: 'flex', marginBottom: '4px' }}>
             <span style={{ width: '100px', color: '#64748B', fontWeight: 600, fontSize: '12px' }}>Phone:</span>
             <strong style={{ color: '#0F172A' }}>{bill.phone || '+91 98765 43210'}</strong>
@@ -198,9 +215,11 @@ export const BillPrintTemplate: React.FC<BillPrintTemplateProps> = ({ bill }) =>
             <th style={{ border: '1px solid #0F172A', padding: '8px 6px', textAlign: 'center', width: '75px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase' }}>
               Meas.
             </th>
-            <th style={{ border: '1px solid #0F172A', padding: '8px 6px', textAlign: 'center', width: '70px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase' }}>
-              Cases
-            </th>
+            {hasCaseData && (
+              <th style={{ border: '1px solid #0F172A', padding: '8px 6px', textAlign: 'center', width: '70px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase' }}>
+                Cases
+              </th>
+            )}
             <th style={{ border: '1px solid #0F172A', padding: '8px 8px', textAlign: 'right', width: '85px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase' }}>
               Rate (₹)
             </th>
@@ -215,7 +234,7 @@ export const BillPrintTemplate: React.FC<BillPrintTemplateProps> = ({ bill }) =>
         <tbody>
           {(bill.products || []).length === 0 ? (
             <tr>
-              <td colSpan={7} style={{ border: '1px solid #CBD5E1', textAlign: 'center', padding: '16px', color: '#64748B' }}>
+              <td colSpan={hasCaseData ? 7 : 6} style={{ border: '1px solid #CBD5E1', textAlign: 'center', padding: '16px', color: '#64748B' }}>
                 No product items in bill
               </td>
             </tr>
@@ -226,9 +245,18 @@ export const BillPrintTemplate: React.FC<BillPrintTemplateProps> = ({ bill }) =>
               return (
                 <tr key={idx} style={{ backgroundColor: isEven ? '#F8FAFC' : '#FFFFFF' }}>
                   <td style={{ border: '1px solid #CBD5E1', padding: '7px 6px', textAlign: 'center', color: '#475569', fontWeight: 600 }}>{idx + 1}</td>
-                  <td style={{ border: '1px solid #CBD5E1', padding: '7px 10px', fontWeight: 700, color: '#0F172A' }}>{item.particular || '-'}</td>
+                  <td style={{ border: '1px solid #CBD5E1', padding: '7px 10px', fontWeight: 700, color: '#0F172A' }}>
+                    {item.particular || '-'}
+                    {hasMixedCompanies && item.companyName && item.companyName.trim() ? (
+                      <div style={{ fontSize: '10.5px', fontWeight: 600, color: '#475569', marginTop: '2px' }}>
+                        {item.companyName.trim()}
+                      </div>
+                    ) : null}
+                  </td>
                   <td style={{ border: '1px solid #CBD5E1', padding: '7px 6px', textAlign: 'center', color: '#475569', fontWeight: 600 }}>{item.measurement && item.measurement.trim() ? item.measurement : '-'}</td>
-                  <td style={{ border: '1px solid #CBD5E1', padding: '7px 6px', textAlign: 'center', fontWeight: 700, color: '#0F172A' }}>{item.quantity || '-'}</td>
+                  {hasCaseData && (
+                    <td style={{ border: '1px solid #CBD5E1', padding: '7px 6px', textAlign: 'center', fontWeight: 700, color: '#0F172A' }}>{item.quantity || '-'}</td>
+                  )}
                   <td style={{ border: '1px solid #CBD5E1', padding: '7px 8px', textAlign: 'right', color: '#334155' }}>₹ {(parseFloat(String(item.rate)) || 0).toFixed(2)}</td>
                   <td style={{ border: '1px solid #CBD5E1', padding: '7px 6px', textAlign: 'center', color: '#64748B' }}>{item.pktUnit && item.pktUnit !== '-' ? item.pktUnit : '-'}</td>
                   <td style={{ border: '1px solid #CBD5E1', padding: '7px 10px', textAlign: 'right', fontWeight: 800, color: '#0F172A' }}>

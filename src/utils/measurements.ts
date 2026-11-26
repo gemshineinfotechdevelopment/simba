@@ -62,6 +62,64 @@ export const extractSavedMeasurements = (
   );
 };
 
+export interface PerformaProductSpecsSummary {
+  measurements: string[];
+  measurementText: string;
+  unitValues: number[];
+  totalUnits: number;
+  unitsText: string;
+}
+
+/**
+ * Summarizes unique measurement labels and per-item / total Units/Pkt for a Performa record.
+ */
+export const summarizePerformaProductSpecs = (performa: {
+  products?: Array<{
+    measurement?: string;
+    productSnapshot?: { measurement?: string };
+    pktPerUnit?: number | string;
+    pktUnit?: number | string;
+  }>;
+} | null | undefined): PerformaProductSpecsSummary => {
+  const products = performa?.products || [];
+  const measurementSet = new Set<string>();
+  const measurements: string[] = [];
+  const unitValues: number[] = [];
+  let totalRaw = 0;
+
+  for (const item of products) {
+    const rawMeas = (item.measurement || item.productSnapshot?.measurement || '').trim();
+    if (rawMeas && !measurementSet.has(rawMeas.toLowerCase())) {
+      measurementSet.add(rawMeas.toLowerCase());
+      measurements.push(rawMeas);
+    }
+
+    const rawUnit = parseFloat(String(item.pktPerUnit ?? item.pktUnit ?? 0));
+    if (!Number.isNaN(rawUnit) && rawUnit > 0) {
+      const cleanUnit = Number(rawUnit.toFixed(2));
+      unitValues.push(cleanUnit);
+      totalRaw += cleanUnit;
+    }
+  }
+
+  const totalUnits = Number(totalRaw.toFixed(2));
+  const measurementText = measurements.length > 0 ? measurements.join(', ') : '-';
+  const unitsText =
+    unitValues.length === 0
+      ? '-'
+      : unitValues.length === 1
+        ? String(unitValues[0])
+        : String(totalUnits);
+
+  return {
+    measurements,
+    measurementText,
+    unitValues,
+    totalUnits,
+    unitsText,
+  };
+};
+
 export const getMatchingMeasurements = (
   options: MeasurementOption[],
   query: string

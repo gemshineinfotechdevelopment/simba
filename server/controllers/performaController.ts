@@ -250,10 +250,14 @@ export const createPerforma = async (req: Request, res: Response, next: NextFunc
       const reqCases = parseFloat(item.requiredCases) || 0;
       const rate = parseFloat(item.rate) || 0;
       const pktPerUnit = parseFloat(item.pktPerUnit) || 1;
+      const gstPercent = Math.max(0, parseFloat(item.gstPercent) || 0);
+      const effCases = reqCases > 0 ? reqCases : 1;
+      const baseAmt = effCases * rate * pktPerUnit;
+      const calcAllocated = gstPercent > 0 ? baseAmt * (1 + gstPercent / 100) : baseAmt;
       const allocated = Number(
         (item.allocatedAmount !== undefined
           ? parseFloat(item.allocatedAmount)
-          : reqCases * rate * pktPerUnit
+          : calcAllocated
         ).toFixed(2)
       );
 
@@ -274,6 +278,7 @@ export const createPerforma = async (req: Request, res: Response, next: NextFunc
         caseOut: 0,
         rate: rate,
         pktPerUnit: pktPerUnit,
+        gstPercent: gstPercent,
         measurement:
           item.measurement !== undefined
             ? String(item.measurement).trim()
@@ -430,7 +435,11 @@ export const updatePerforma = async (req: Request, res: Response, next: NextFunc
         const usedCases = parseFloat(item.usedCases) || 0;
         const rate = parseFloat(item.rate) || 0;
         const pktPerUnit = parseFloat(item.pktPerUnit) || 1;
-        const allocated = parseFloat(item.allocatedAmount) || reqCases * rate * pktPerUnit;
+        const gstPercent = Math.max(0, parseFloat(item.gstPercent) || 0);
+        const effCases = reqCases > 0 ? reqCases : 1;
+        const baseAmt = effCases * rate * pktPerUnit;
+        const calcAllocated = gstPercent > 0 ? baseAmt * (1 + gstPercent / 100) : baseAmt;
+        const allocated = parseFloat(item.allocatedAmount) || calcAllocated;
         const usedAmt = parseFloat(item.usedAmount) || 0;
 
         totalReq += reqCases;
@@ -450,6 +459,7 @@ export const updatePerforma = async (req: Request, res: Response, next: NextFunc
           caseOut: parseFloat(item.caseOut) || usedCases,
           rate: rate,
           pktPerUnit: pktPerUnit,
+          gstPercent: gstPercent,
           measurement:
             item.measurement !== undefined
               ? String(item.measurement).trim()

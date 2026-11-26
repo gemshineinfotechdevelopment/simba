@@ -10,6 +10,7 @@ export interface PerformaPrintProduct {
   remainingCases?: number;
   rate: number;
   pktPerUnit: number;
+  gstPercent?: number;
   measurement?: string;
   allocatedAmount: number;
 }
@@ -133,6 +134,13 @@ export const PerformaPrintTemplate: React.FC<PerformaPrintTemplateProps> = ({ pe
   const billsTotalAmt = (performa.customerBills || []).reduce(
     (acc: number, b: any) => acc + (parseFloat(String(b.netTotal || b.total || b.amount || 0)) || 0),
     0
+  );
+
+  const hasCaseData =
+    Number(performa.totalRequiredCases || 0) > 0 ||
+    (performa.products || []).some((p: any) => (parseFloat(String(p.requiredCases || 0)) || 0) > 0);
+  const hasGstData = (performa.products || []).some(
+    (p: any) => (parseFloat(String(p.gstPercent || 0)) || 0) > 0
   );
 
   return (
@@ -267,93 +275,107 @@ export const PerformaPrintTemplate: React.FC<PerformaPrintTemplateProps> = ({ pe
 
       {/* Products Allocation Table */}
       <table
-        style={{
-          width: '100%',
-          borderCollapse: 'collapse',
-          border: '1px solid #0F172A',
-          marginBottom: '16px',
-          fontSize: '12px',
-        }}
-      >
-        <thead>
-          <tr style={{ backgroundColor: '#0F172A', color: '#FFFFFF' }}>
-            <th style={{ padding: '8px 6px', textAlign: 'center', width: '35px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', border: '1px solid #0F172A' }}>#</th>
-            <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', border: '1px solid #0F172A' }}>Product Description</th>
-            <th style={{ padding: '8px 6px', textAlign: 'center', width: '75px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', border: '1px solid #0F172A' }}>Meas.</th>
-            <th style={{ padding: '8px 8px', textAlign: 'left', width: '110px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', border: '1px solid #0F172A' }}>Company</th>
-            <th style={{ padding: '8px 6px', textAlign: 'center', width: '75px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', border: '1px solid #0F172A' }}>Total Cases</th>
-            <th style={{ padding: '8px 8px', textAlign: 'right', width: '80px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', border: '1px solid #0F172A' }}>Rate (₹)</th>
-            <th style={{ padding: '8px 6px', textAlign: 'center', width: '55px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', border: '1px solid #0F172A' }}>Units</th>
-            <th style={{ padding: '8px 10px', textAlign: 'right', width: '105px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', border: '1px solid #0F172A' }}>Amount (₹)</th>
-          </tr>
-        </thead>
-        <tbody>
-          {(performa.products || []).length === 0 ? (
-            <tr>
-              <td colSpan={8} style={{ padding: '16px', textAlign: 'center', color: '#64748B', border: '1px solid #CBD5E1' }}>
-                No products allocated.
-              </td>
-            </tr>
-          ) : (
-            (performa.products || []).map((item, index) => {
-              const isEven = index % 2 === 1;
-              return (
-                <tr key={index} style={{ backgroundColor: isEven ? '#F8FAFC' : '#FFFFFF' }}>
-                  <td style={{ padding: '7px 6px', textAlign: 'center', color: '#475569', border: '1px solid #CBD5E1', fontWeight: 600 }}>{index + 1}</td>
-                  <td style={{ padding: '7px 10px', border: '1px solid #CBD5E1' }}>
-                    <div style={{ fontWeight: 700, color: '#0F172A' }}>{item.productName}</div>
-                    {item.productCode && (
-                      <div style={{ fontSize: '10.5px', color: '#64748B' }}>Code: {item.productCode}</div>
-                    )}
-                  </td>
-                  <td style={{ padding: '7px 6px', textAlign: 'center', color: '#475569', fontWeight: 600, border: '1px solid #CBD5E1' }}>
-                    {(item.measurement && item.measurement.trim()) || (item as any).productSnapshot?.measurement || '-'}
-                  </td>
-                  <td style={{ padding: '7px 8px', color: '#0B4DB7', fontWeight: 600, border: '1px solid #CBD5E1', fontSize: '11.5px' }}>
-                    {(item.companyName && item.companyName.trim()) || (item as any).productSnapshot?.companyName || performa.companyName || '-'}
-                  </td>
-                  <td style={{ padding: '7px 6px', textAlign: 'center', fontWeight: 800, color: '#0F172A', border: '1px solid #CBD5E1' }}>
-                    {item.requiredCases}
-                  </td>
-                  <td style={{ padding: '7px 8px', textAlign: 'right', border: '1px solid #CBD5E1', color: '#334155' }}>₹ {formatCurrency(item.rate)}</td>
-                  <td style={{ padding: '7px 6px', textAlign: 'center', border: '1px solid #CBD5E1', color: '#64748B' }}>{item.pktPerUnit || 1}</td>
-                  <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 800, color: '#0F172A', border: '1px solid #CBD5E1' }}>
-                    ₹ {formatCurrency(item.allocatedAmount)}
-                  </td>
+              style={{
+                width: '100%',
+                borderCollapse: 'collapse',
+                border: '1px solid #0F172A',
+                marginBottom: '16px',
+                fontSize: '12px',
+              }}
+            >
+              <thead>
+                <tr style={{ backgroundColor: '#0F172A', color: '#FFFFFF' }}>
+                  <th style={{ padding: '8px 6px', textAlign: 'center', width: '35px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', border: '1px solid #0F172A' }}>#</th>
+                  <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', border: '1px solid #0F172A' }}>Product Description</th>
+                  <th style={{ padding: '8px 6px', textAlign: 'center', width: '75px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', border: '1px solid #0F172A' }}>Meas.</th>
+                  <th style={{ padding: '8px 8px', textAlign: 'left', width: '110px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', border: '1px solid #0F172A' }}>Company</th>
+                  {hasCaseData && (
+                    <th style={{ padding: '8px 6px', textAlign: 'center', width: '75px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', border: '1px solid #0F172A' }}>Total Cases</th>
+                  )}
+                  <th style={{ padding: '8px 8px', textAlign: 'right', width: '80px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', border: '1px solid #0F172A' }}>Rate (₹)</th>
+                  <th style={{ padding: '8px 6px', textAlign: 'center', width: '55px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', border: '1px solid #0F172A' }}>Units</th>
+                  {hasGstData && (
+                    <th style={{ padding: '8px 6px', textAlign: 'center', width: '55px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', border: '1px solid #0F172A' }}>GST %</th>
+                  )}
+                  <th style={{ padding: '8px 10px', textAlign: 'right', width: '105px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', border: '1px solid #0F172A' }}>Amount (₹)</th>
                 </tr>
-              );
-            })
-          )}
-        </tbody>
-      </table>
+              </thead>
+              <tbody>
+                {(performa.products || []).length === 0 ? (
+                  <tr>
+                    <td colSpan={7 + (hasCaseData ? 1 : 0) + (hasGstData ? 1 : 0)} style={{ padding: '16px', textAlign: 'center', color: '#64748B', border: '1px solid #CBD5E1' }}>
+                      No products allocated.
+                    </td>
+                  </tr>
+                ) : (
+                  (performa.products || []).map((item, index) => {
+                    const isEven = index % 2 === 1;
+                    return (
+                      <tr key={index} style={{ backgroundColor: isEven ? '#F8FAFC' : '#FFFFFF' }}>
+                        <td style={{ padding: '7px 6px', textAlign: 'center', color: '#475569', border: '1px solid #CBD5E1', fontWeight: 600 }}>{index + 1}</td>
+                        <td style={{ padding: '7px 10px', border: '1px solid #CBD5E1' }}>
+                          <div style={{ fontWeight: 700, color: '#0F172A' }}>{item.productName}</div>
+                          {item.productCode && (
+                            <div style={{ fontSize: '10.5px', color: '#64748B' }}>Code: {item.productCode}</div>
+                          )}
+                        </td>
+                        <td style={{ padding: '7px 6px', textAlign: 'center', color: '#475569', fontWeight: 600, border: '1px solid #CBD5E1' }}>
+                          {(item.measurement && item.measurement.trim()) || (item as any).productSnapshot?.measurement || '-'}
+                        </td>
+                        <td style={{ padding: '7px 8px', color: '#0B4DB7', fontWeight: 600, border: '1px solid #CBD5E1', fontSize: '11.5px' }}>
+                          {(item.companyName && item.companyName.trim()) || (item as any).productSnapshot?.companyName || performa.companyName || '-'}
+                        </td>
+                        {hasCaseData && (
+                          <td style={{ padding: '7px 6px', textAlign: 'center', fontWeight: 800, color: '#0F172A', border: '1px solid #CBD5E1' }}>
+                            {item.requiredCases}
+                          </td>
+                        )}
+                        <td style={{ padding: '7px 8px', textAlign: 'right', border: '1px solid #CBD5E1', color: '#334155' }}>₹ {formatCurrency(item.rate)}</td>
+                        <td style={{ padding: '7px 6px', textAlign: 'center', border: '1px solid #CBD5E1', color: '#64748B' }}>{item.pktPerUnit || 1}</td>
+                        {hasGstData && (
+                          <td style={{ padding: '7px 6px', textAlign: 'center', border: '1px solid #CBD5E1', color: '#166534', fontWeight: 700 }}>
+                            {Number(item.gstPercent) > 0 ? `${item.gstPercent}%` : '-'}
+                          </td>
+                        )}
+                        <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 800, color: '#0F172A', border: '1px solid #CBD5E1' }}>
+                          ₹ {formatCurrency(item.allocatedAmount)}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
 
-      {/* Summary Box & Financial Breakdown */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          gap: '18px',
-          marginTop: '10px',
-          marginBottom: '16px',
-        }}
-      >
-        <div style={{ width: '52%', fontSize: '11px', color: '#64748B', border: '1px solid #E2E8F0', borderRadius: '6px', padding: '10px 14px', backgroundColor: '#FAFAFA' }}>
-          {performa.notes && (
-            <div style={{ marginBottom: '6px' }}>
-              <div style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B' }}>Notes: <em>{performa.notes}</em></div>
-            </div>
-          )}
-          <div style={{ lineHeight: '1.4' }}>
-            • This quotation reserves product requirement allocation.
-          </div>
-        </div>
+            {/* Summary Box & Financial Breakdown */}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                gap: '18px',
+                marginTop: '10px',
+                marginBottom: '16px',
+              }}
+            >
+              <div style={{ width: '52%', fontSize: '11px', color: '#64748B', border: '1px solid #E2E8F0', borderRadius: '6px', padding: '10px 14px', backgroundColor: '#FAFAFA' }}>
+                {performa.notes && (
+                  <div style={{ marginBottom: '6px' }}>
+                    <div style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B' }}>Notes: <em>{performa.notes}</em></div>
+                  </div>
+                )}
+                <div style={{ lineHeight: '1.4' }}>
+                  • This quotation reserves product requirement allocation.
+                </div>
+              </div>
 
-        <div style={{ width: '44%', fontSize: '12px', border: '1px solid #CBD5E1', borderRadius: '6px', backgroundColor: '#F8FAFC', padding: '10px 14px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-            <span style={{ color: '#475569' }}>Total Cases:</span>
-            <strong style={{ color: '#0F172A' }}>{performa.totalRequiredCases}</strong>
-          </div>
+              <div style={{ width: '44%', fontSize: '12px', border: '1px solid #CBD5E1', borderRadius: '6px', backgroundColor: '#F8FAFC', padding: '10px 14px' }}>
+                {hasCaseData && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                    <span style={{ color: '#475569' }}>Total Cases:</span>
+                    <strong style={{ color: '#0F172A' }}>{performa.totalRequiredCases}</strong>
+                  </div>
+                )}
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
             <span style={{ color: '#475569' }}>Subtotal:</span>
             <strong style={{ color: '#0F172A' }}>₹ {formatCurrency(subtotalVal)}</strong>

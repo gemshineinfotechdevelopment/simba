@@ -46,7 +46,7 @@ import { PerformasApi, CustomersApi, CompaniesApi, ProductsApi, ParticularsApi }
 import { PerformaPrintModal } from './PerformaPrintModal';
 import type { PerformaPrintData } from './PerformaPrintTemplate';
 import { sharePerformaOnWhatsApp, shareAllPerformasOnWhatsApp } from '../utils/whatsappUtils';
-import { extractSavedMeasurements, mergeMeasurementOptions } from '../utils/measurements';
+import { extractSavedMeasurements, mergeMeasurementOptions, summarizePerformaProductSpecs } from '../utils/measurements';
 import { MeasurementInput } from './MeasurementInput';
 
 interface EditProductItem {
@@ -61,6 +61,7 @@ interface EditProductItem {
   remainingCases?: number;
   rate: number | string;
   pktPerUnit: number | string;
+  gstPercent?: number | string;
   measurement?: string;
   allocatedAmount: number | string;
 }
@@ -122,7 +123,6 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
   const [newRowProductName, setNewRowProductName] = useState<string>('');
   const [newRowProductCode, setNewRowProductCode] = useState<string>('');
   const [newRowProductCompany, setNewRowProductCompany] = useState<string>('');
-  const [newRowCases, setNewRowCases] = useState<string>('');
   const [newRowRate, setNewRowRate] = useState<string>('');
   const [newRowPktUnit, setNewRowPktUnit] = useState<string>('1');
   const [newRowMeasurement, setNewRowMeasurement] = useState<string>('');
@@ -214,7 +214,7 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
       setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
     } else {
       setSortBy(column);
-      setSortOrder(column === 'date' || column === 'advance' || column === 'cases' ? 'desc' : 'asc');
+      setSortOrder(column === 'date' || column === 'advance' ? 'desc' : 'asc');
     }
   };
 
@@ -285,6 +285,7 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
         remainingCases: p.remainingCases,
         rate: p.rate,
         pktPerUnit: p.pktPerUnit || 1,
+        gstPercent: p.gstPercent || 0,
         measurement: p.measurement || p.productSnapshot?.measurement || '',
         allocatedAmount: p.allocatedAmount,
       })),
@@ -343,8 +344,9 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
         remainingCases: p.remainingCases || p.requiredCases || 0,
         rate: p.rate || 0,
         pktPerUnit: p.pktPerUnit || 1,
+        gstPercent: p.gstPercent || 0,
         measurement: p.measurement || p.productSnapshot?.measurement || '',
-        allocatedAmount: p.allocatedAmount || (p.requiredCases || 0) * (p.rate || 0) * (p.pktPerUnit || 1),
+        allocatedAmount: p.allocatedAmount || (p.requiredCases > 0 ? p.requiredCases : 1) * (p.rate || 0) * (p.pktPerUnit || 1),
       }));
 
       setEditProducts(loadedProducts);
@@ -359,17 +361,18 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
   // Edit Modal Product Row actions
   const handleEditProductChange = (
     id: string,
-    field: 'requiredCases' | 'rate' | 'pktPerUnit' | 'companyName' | 'productName' | 'measurement',
+    field: 'rate' | 'pktPerUnit' | 'gstPercent' | 'companyName' | 'productName' | 'measurement',
     val: string
   ) => {
     setEditProducts((prev) =>
       prev.map((item) => {
         if (item.id !== id) return item;
         const updated = { ...item, [field]: val };
-        const req = parseFloat(String(updated.requiredCases)) || 0;
         const rt = parseFloat(String(updated.rate)) || 0;
         const pkt = parseFloat(String(updated.pktPerUnit)) || 1;
-        updated.allocatedAmount = (req * rt * pkt).toFixed(2);
+        const gst = Math.max(0, parseFloat(String(updated.gstPercent ?? 0)) || 0);
+        const baseAmt = rt * pkt;
+        updated.allocatedAmount = (gst > 0 ? baseAmt * (1 + gst / 100) : baseAmt).toFixed(2);
         return updated;
       })
     );
@@ -385,18 +388,13 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
       setToast({ open: true, message: 'Please select or type a product name', severity: 'error' });
       return;
     }
-    const casesVal = parseFloat(newRowCases) || 0;
-    if (casesVal <= 0) {
-      setToast({ open: true, message: 'Enter a valid case quantity > 0', severity: 'error' });
-      return;
-    }
     const rateVal = parseFloat(newRowRate) || 0;
     if (rateVal <= 0) {
       setToast({ open: true, message: 'Enter a valid rate > 0', severity: 'error' });
       return;
     }
     const unitsVal = parseFloat(newRowPktUnit) || 1;
-    const allocatedAmt = (casesVal * rateVal * unitsVal).toFixed(2);
+    const allocatedAmt = (rateVal * unitsVal).toFixed(2);
 
     const newItem: EditProductItem = {
       id: Date.now().toString(),
@@ -405,9 +403,9 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
       productName: trimmed,
       companyName: newRowProductCompany.trim() || (editCompanyName && editCompanyName.toLowerCase() !== 'general' ? editCompanyName.trim() : '') || '',
       category: newRowProductObj?.category || 'Trading',
-      requiredCases: casesVal,
+      requiredCases: 0,
       usedCases: 0,
-      remainingCases: casesVal,
+      remainingCases: 0,
       rate: rateVal,
       pktPerUnit: unitsVal,
       measurement: newRowMeasurement.trim(),
@@ -420,15 +418,15 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
     setNewRowProductObj(null);
     setNewRowProductName('');
     setNewRowProductCode('');
-    setNewRowCases('');
     setNewRowRate('');
     setNewRowPktUnit('1');
     setNewRowMeasurement('');
   };
 
   // Edit Aggregates
-  const editTotalCases = useMemo(() => {
-    return editProducts.reduce((sum, p) => sum + (parseFloat(String(p.requiredCases)) || 0), 0);
+  const editTotalUnits = useMemo(() => {
+    const sum = editProducts.reduce((acc, p) => acc + (parseFloat(String(p.pktPerUnit)) || 0), 0);
+    return Number(sum.toFixed(2));
   }, [editProducts]);
 
   const editSubtotalAllocated = useMemo(() => {
@@ -530,10 +528,11 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
             companyName: p.companyName || editCompanyName || 'General',
             category: p.category,
           },
-          requiredCases: parseFloat(String(p.requiredCases)) || 0,
+          requiredCases: 0,
           usedCases: p.usedCases || 0,
           rate: parseFloat(String(p.rate)) || 0,
           pktPerUnit: parseFloat(String(p.pktPerUnit)) || 1,
+          gstPercent: parseFloat(String(p.gstPercent ?? 0)) || 0,
           measurement: p.measurement || '',
           allocatedAmount: parseFloat(String(p.allocatedAmount)) || 0,
         })),
@@ -725,10 +724,10 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
           <Card elevation={0} sx={{ border: '1px solid #E2E8F0', borderRadius: '10px', backgroundColor: '#FFFFFF' }}>
             <CardContent sx={{ p: '16px !important' }}>
               <Typography sx={{ fontSize: '11.5px', fontWeight: 700, color: '#64748B', textTransform: 'uppercase' }}>
-                Total Cases
+                Total Units/Pkt
               </Typography>
               <Typography sx={{ fontSize: '22px', fontWeight: 800, color: '#0B4DB7', mt: 0.5 }}>
-                {summary.totalRequiredCases || 0}
+                {Number(performas.reduce((acc, p) => acc + summarizePerformaProductSpecs(p).totalUnits, 0).toFixed(2))}
               </Typography>
             </CardContent>
           </Card>
@@ -846,8 +845,6 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
               <MenuItem value="value-asc">Performa Value (Low to High)</MenuItem>
               <MenuItem value="advance-desc">Advance (High to Low)</MenuItem>
               <MenuItem value="advance-asc">Advance (Low to High)</MenuItem>
-              <MenuItem value="cases-desc">Total Cases (High to Low)</MenuItem>
-              <MenuItem value="cases-asc">Total Cases (Low to High)</MenuItem>
               <MenuItem value="performaNumber-desc">Performa No (Desc)</MenuItem>
               <MenuItem value="performaNumber-asc">Performa No (Asc)</MenuItem>
             </Select>
@@ -952,15 +949,8 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
                   </TableSortLabel>
                 </TableCell>
                 <TableCell sx={{ fontWeight: 800, textAlign: 'right', color: '#475569' }}>Balance to Pay</TableCell>
-                <TableCell sx={{ fontWeight: 800, textAlign: 'center', color: '#475569' }}>
-                  <TableSortLabel
-                    active={sortBy === 'cases'}
-                    direction={sortBy === 'cases' ? sortOrder : 'desc'}
-                    onClick={() => handleSortRequest('cases')}
-                  >
-                    Total Cases
-                  </TableSortLabel>
-                </TableCell>
+                <TableCell sx={{ fontWeight: 800, textAlign: 'center', color: '#475569' }}>Measurement</TableCell>
+                <TableCell sx={{ fontWeight: 800, textAlign: 'center', color: '#475569' }}>Units/Pkt</TableCell>
                 <TableCell sx={{ fontWeight: 800, textAlign: 'center', color: '#475569' }}>Status</TableCell>
                 <TableCell sx={{ fontWeight: 800, textAlign: 'center', color: '#475569' }}>Actions</TableCell>
               </TableRow>
@@ -968,13 +958,13 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={9} sx={{ textAlign: 'center', py: 6 }}>
+                  <TableCell colSpan={10} sx={{ textAlign: 'center', py: 6 }}>
                     <CircularProgress size={30} sx={{ color: '#0B4DB7' }} />
                   </TableCell>
                 </TableRow>
               ) : performas.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} sx={{ textAlign: 'center', py: 6, color: '#94A3B8' }}>
+                  <TableCell colSpan={10} sx={{ textAlign: 'center', py: 6, color: '#94A3B8' }}>
                     No Performa records found matching the current filters.
                   </TableCell>
                 </TableRow>
@@ -983,6 +973,7 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
                   const performaVal = p.totalAllocatedAmount !== undefined ? p.totalAllocatedAmount : (p.performaTotalValue || 0);
                   const advAmt = p.advanceAmount || 0;
                   const balanceToPay = Math.max(0, performaVal - advAmt);
+                  const { measurements, totalUnits, unitValues } = summarizePerformaProductSpecs(p);
 
                   return (
                     <TableRow key={p._id} hover sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
@@ -1012,9 +1003,46 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
                         ₹{balanceToPay.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                       </TableCell>
                       <TableCell sx={{ textAlign: 'center' }}>
-                        <Typography sx={{ fontSize: '13px', fontWeight: 800, color: '#0F172A' }}>
-                          {p.totalRequiredCases || p.totalCases || 0}
-                        </Typography>
+                        {measurements.length > 0 ? (
+                          <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 0.5 }}>
+                            {measurements.map((meas) => (
+                              <Chip
+                                key={meas}
+                                label={meas}
+                                size="small"
+                                sx={{
+                                  height: '22px',
+                                  fontSize: '11.5px',
+                                  fontWeight: 700,
+                                  backgroundColor: '#F1F5F9',
+                                  color: '#0F172A',
+                                }}
+                              />
+                            ))}
+                          </Box>
+                        ) : (
+                          <Typography component="span" sx={{ fontSize: '12.5px', color: '#94A3B8' }}>
+                            -
+                          </Typography>
+                        )}
+                      </TableCell>
+                      <TableCell sx={{ textAlign: 'center' }}>
+                        {unitValues.length > 0 ? (
+                          <Box>
+                            <Typography sx={{ fontSize: '13px', fontWeight: 800, color: '#0F172A' }}>
+                              {totalUnits}
+                            </Typography>
+                            {unitValues.length > 1 && (
+                              <Typography sx={{ fontSize: '11px', color: '#64748B' }}>
+                                ({unitValues.join(' + ')})
+                              </Typography>
+                            )}
+                          </Box>
+                        ) : (
+                          <Typography component="span" sx={{ fontSize: '12.5px', color: '#94A3B8' }}>
+                            -
+                          </Typography>
+                        )}
                       </TableCell>
                       <TableCell sx={{ textAlign: 'center' }}>{getStatusChip(p.status)}</TableCell>
                       <TableCell sx={{ textAlign: 'center' }}>
@@ -1181,7 +1209,7 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
                     <TableRow>
                       <TableCell sx={{ fontWeight: 800 }}>Product</TableCell>
                       <TableCell sx={{ fontWeight: 800, textAlign: 'center' }}>Measurement</TableCell>
-                      <TableCell sx={{ fontWeight: 800, textAlign: 'center' }}>Total Cases</TableCell>
+                      <TableCell sx={{ fontWeight: 800, textAlign: 'center' }}>Units/Pkt</TableCell>
                       <TableCell sx={{ fontWeight: 800, textAlign: 'right' }}>Rate (₹)</TableCell>
                       <TableCell sx={{ fontWeight: 800, textAlign: 'right' }}>Allocated Value</TableCell>
                     </TableRow>
@@ -1198,7 +1226,9 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
                         <TableCell sx={{ textAlign: 'center', fontWeight: 600, color: '#475569' }}>
                           {prod.measurement || prod.productSnapshot?.measurement || '-'}
                         </TableCell>
-                        <TableCell sx={{ textAlign: 'center', fontWeight: 800, color: '#0F172A' }}>{prod.requiredCases}</TableCell>
+                        <TableCell sx={{ textAlign: 'center', fontWeight: 800, color: '#0F172A' }}>
+                          {prod.pktPerUnit ?? prod.pktUnit ?? 1}
+                        </TableCell>
                         <TableCell sx={{ textAlign: 'right' }}>₹{prod.rate?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</TableCell>
                         <TableCell sx={{ textAlign: 'right', fontWeight: 700 }}>₹{prod.allocatedAmount?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</TableCell>
                       </TableRow>
@@ -1507,7 +1537,7 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
                     Allocated Products & Quantities
                   </Typography>
                   <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
-                    <Chip label={`Cases: ${editTotalCases}`} sx={{ fontWeight: 800, backgroundColor: '#EFF6FF', color: '#0B4DB7' }} />
+                    <Chip label={`Total Units/Pkt: ${editTotalUnits}`} sx={{ fontWeight: 800, backgroundColor: '#EFF6FF', color: '#0B4DB7' }} />
                     <Chip label={`Subtotal: ₹${editSubtotalAllocated.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`} sx={{ fontWeight: 700, backgroundColor: '#F1F5F9', color: '#475569' }} />
                     {editDiscountVal > 0 && (
                       <Chip label={`Discount: -₹${editDiscountVal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`} sx={{ fontWeight: 700, backgroundColor: '#FEF2F2', color: '#DC2626' }} />
@@ -1526,7 +1556,7 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
                 <Box
                   sx={{
                     display: 'grid',
-                    gridTemplateColumns: { xs: '1fr', sm: '1.4fr 1.1fr 1fr 0.85fr 0.85fr 0.7fr auto' },
+                    gridTemplateColumns: { xs: '1fr', sm: '1.5fr 1.1fr 1.1fr 0.9fr 0.85fr auto' },
                     gap: 1.5,
                     alignItems: 'center',
                     backgroundColor: '#F8FAFC',
@@ -1540,8 +1570,13 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
                     options={filteredEditModalProducts}
                     getOptionLabel={(o) => {
                       if (typeof o === 'string') return o;
-                      return `${o.name || ''} ${o.code ? `(${o.code})` : ''} ${o.companyName ? `• ${o.companyName}` : ''}`.trim();
+                      return o.name || '';
                     }}
+                    isOptionEqualToValue={(o, val) =>
+                      typeof val === 'string'
+                        ? o.name === val
+                        : Boolean((o._id && val._id && o._id === val._id) || o.name === val.name)
+                    }
                     value={newRowProductObj}
                     onChange={(_e, val) => {
                       setNewRowProductObj(val);
@@ -1583,15 +1618,6 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
                   />
 
                   <TextField
-                    label="Req Cases"
-                    type="number"
-                    size="small"
-                    value={newRowCases}
-                    onChange={(e) => setNewRowCases(e.target.value)}
-                    placeholder="e.g. 50"
-                  />
-
-                  <TextField
                     label="Rate (₹)"
                     type="number"
                     size="small"
@@ -1601,7 +1627,7 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
                   />
 
                   <TextField
-                    label="Pkt/Unit"
+                    label="Units/Pkt"
                     type="number"
                     size="small"
                     value={newRowPktUnit}
@@ -1627,9 +1653,8 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
                         <TableCell sx={{ fontWeight: 800 }}>Product Name & Code</TableCell>
                         <TableCell sx={{ fontWeight: 800, width: '130px' }}>Measurement</TableCell>
                         <TableCell sx={{ fontWeight: 800 }}>Company / Brand</TableCell>
-                        <TableCell sx={{ fontWeight: 800, width: '130px' }}>Req Cases</TableCell>
                         <TableCell sx={{ fontWeight: 800, width: '130px' }}>Rate (₹)</TableCell>
-                        <TableCell sx={{ fontWeight: 800, width: '90px' }}>Pkt/Unit</TableCell>
+                        <TableCell sx={{ fontWeight: 800, width: '90px' }}>Units/Pkt</TableCell>
                         <TableCell sx={{ fontWeight: 800, textAlign: 'right' }}>Allocated (₹)</TableCell>
                         <TableCell sx={{ fontWeight: 800, width: '50px', textAlign: 'center' }}>Remove</TableCell>
                       </TableRow>
@@ -1637,7 +1662,7 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
                     <TableBody>
                       {editProducts.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={8} sx={{ textAlign: 'center', py: 3, color: '#94A3B8' }}>
+                          <TableCell colSpan={7} sx={{ textAlign: 'center', py: 3, color: '#94A3B8' }}>
                             No products added to this performa.
                           </TableCell>
                         </TableRow>
@@ -1666,15 +1691,6 @@ export const AllPerformaPage: FC<AllPerformaPageProps> = ({ onAddNewPerforma, on
                                 value={p.companyName}
                                 onChange={(e) => handleEditProductChange(p.id, 'companyName', e.target.value)}
                                 sx={{ maxWidth: '140px' }}
-                              />
-                            </TableCell>
-                            <TableCell>
-                              <TextField
-                                type="number"
-                                size="small"
-                                value={p.requiredCases}
-                                onChange={(e) => handleEditProductChange(p.id, 'requiredCases', e.target.value)}
-                                sx={{ width: '100px' }}
                               />
                             </TableCell>
                             <TableCell>

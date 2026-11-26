@@ -14,6 +14,7 @@ export interface IPerformaProductItem {
   caseOut: number;
   rate: number;
   pktPerUnit: number;
+  gstPercent?: number;
   measurement?: string;
   allocatedAmount: number;
   usedAmount: number;
@@ -74,6 +75,7 @@ const PerformaProductItemSchema: Schema = new Schema({
   caseOut: { type: Number, required: true, min: 0, default: 0, set: (v: number) => Math.max(0, Number(v) || 0) },
   rate: { type: Number, required: true, min: 0, default: 0, set: (v: number) => Math.max(0, Number(v) || 0) },
   pktPerUnit: { type: Number, required: true, min: 0, default: 1 },
+  gstPercent: { type: Number, min: 0, default: 0, set: (v: number) => Math.max(0, Number(v) || 0) },
   measurement: { type: String, trim: true, default: '' },
   allocatedAmount: { type: Number, required: true, min: 0, default: 0, set: (v: number) => Math.max(0, Number(v) || 0) },
   usedAmount: { type: Number, required: true, min: 0, default: 0, set: (v: number) => Math.max(0, Number(v) || 0) },

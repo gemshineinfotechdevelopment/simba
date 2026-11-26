@@ -41,8 +41,7 @@ export const parseDateToTimestamp = (dateStr: string): number => {
   return isNaN(parsed) ? 0 : parsed;
 };
 
-/** Resolves a charge string as % (if explicit '%' or value < 100 without currency prefix) or flat rupees. */
-const resolveChargeAmount = (rawVal: unknown, base: number): number => {
+const resolveSingleChargeAmount = (rawVal: unknown, base: number): number => {
   const str = String(rawVal || '0').trim();
   const num = cleanNumber(str);
   if (num <= 0) return 0;
@@ -51,6 +50,17 @@ const resolveChargeAmount = (rawVal: unknown, base: number): number => {
     return (base * num) / 100;
   }
   return num;
+};
+
+/** Resolves a charge string as % (if explicit '%' or value < 100 without currency prefix) or flat rupees. */
+const resolveChargeAmount = (rawVal: unknown, base: number): number => {
+  const str = String(rawVal || '0').trim();
+  if (str.includes('+')) {
+    return str
+      .split('+')
+      .reduce((sum, part) => sum + resolveSingleChargeAmount(part, base), 0);
+  }
+  return resolveSingleChargeAmount(str, base);
 };
 
 export const getParticularNetTotal = (p: any): number => {

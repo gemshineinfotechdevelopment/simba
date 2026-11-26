@@ -37,6 +37,7 @@ export interface Company {
   avatarBg?: string;
   avatarColor?: string;
   address: string;
+  phone?: string;
   gstin: string;
 }
 
@@ -54,6 +55,7 @@ export const CompaniesPage: FC<CompaniesPageProps> = ({ onAddCompany }) => {
   const [editingCompany, setEditingCompany] = useState<Company | null>(null);
   const [editFormData, setEditFormData] = useState({
     name: '',
+    phone: '',
     gstin: '',
     address: '',
   });
@@ -79,6 +81,7 @@ export const CompaniesPage: FC<CompaniesPageProps> = ({ onAddCompany }) => {
     setEditingCompany(company);
     setEditFormData({
       name: company.name || '',
+      phone: company.phone ? String(company.phone).replace(/\D/g, '').slice(0, 10) : '',
       gstin: company.gstin || '',
       address: company.address || '',
     });
@@ -90,8 +93,14 @@ export const CompaniesPage: FC<CompaniesPageProps> = ({ onAddCompany }) => {
     const id = editingCompany._id || editingCompany.id;
     if (!id) return;
 
-    if (!editFormData.name.trim() || !editFormData.address.trim()) {
-      alert('Please fill in Company Name and Address');
+    const phoneDigits = editFormData.phone.replace(/\D/g, '');
+    if (!editFormData.name.trim() || !phoneDigits || !editFormData.address.trim()) {
+      alert('Please fill in Company Name, Mobile Number, and Address');
+      return;
+    }
+
+    if (phoneDigits.length !== 10) {
+      alert('Please enter a valid 10-digit mobile number');
       return;
     }
 
@@ -99,6 +108,7 @@ export const CompaniesPage: FC<CompaniesPageProps> = ({ onAddCompany }) => {
       setEditLoading(true);
       await CompaniesApi.update(id, {
         name: editFormData.name.trim(),
+        phone: phoneDigits,
         gstin: editFormData.gstin.trim() || 'N/A',
         address: editFormData.address.trim(),
         avatarLetter: editFormData.name.trim().charAt(0).toUpperCase(),
@@ -130,6 +140,7 @@ export const CompaniesPage: FC<CompaniesPageProps> = ({ onAddCompany }) => {
         (c) =>
           c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
           c.address.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (c.phone && c.phone.includes(searchTerm)) ||
           c.gstin.toLowerCase().includes(searchTerm.toLowerCase())
       )
       .sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
@@ -342,6 +353,19 @@ export const CompaniesPage: FC<CompaniesPageProps> = ({ onAddCompany }) => {
                     borderBottom: '1px solid #EEF2F6',
                   }}
                 >
+                  PHONE
+                </TableCell>
+                <TableCell
+                  sx={{
+                    py: 1.6,
+                    px: 3,
+                    fontSize: '11.5px',
+                    fontWeight: 700,
+                    color: '#475569',
+                    letterSpacing: '0.04em',
+                    borderBottom: '1px solid #EEF2F6',
+                  }}
+                >
                   GSTIN
                 </TableCell>
                 <TableCell
@@ -365,13 +389,13 @@ export const CompaniesPage: FC<CompaniesPageProps> = ({ onAddCompany }) => {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={5} align="center" sx={{ py: 6 }}>
+                  <TableCell colSpan={6} align="center" sx={{ py: 6 }}>
                     <CircularProgress size={32} sx={{ color: '#0B4DB7' }} />
                   </TableCell>
                 </TableRow>
               ) : filteredCompanies.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} align="center" sx={{ py: 6, color: '#64748B' }}>
+                  <TableCell colSpan={6} align="center" sx={{ py: 6, color: '#64748B' }}>
                     No companies found. Click "Add Company" to create one.
                   </TableCell>
                 </TableRow>
@@ -457,6 +481,20 @@ export const CompaniesPage: FC<CompaniesPageProps> = ({ onAddCompany }) => {
                         }}
                       >
                         {company.address}
+                      </TableCell>
+
+                      {/* Phone */}
+                      <TableCell
+                        sx={{
+                          py: 1.6,
+                          px: 3,
+                          fontSize: '13.5px',
+                          color: '#334155',
+                          fontWeight: 600,
+                          borderBottom: isLast ? 'none' : '1px solid #F8FAFC',
+                        }}
+                      >
+                        {company.phone || '-'}
                       </TableCell>
 
                       {/* GSTIN */}
@@ -570,6 +608,34 @@ export const CompaniesPage: FC<CompaniesPageProps> = ({ onAddCompany }) => {
                 onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
                 slotProps={{
                   input: { sx: { fontSize: '13.5px', fontWeight: 500, borderRadius: '6px' } },
+                }}
+              />
+            </Box>
+
+            <Box>
+              <Typography sx={{ fontSize: '13px', fontWeight: 600, color: '#475569', mb: 0.5 }}>
+                Mobile Number *
+              </Typography>
+              <TextField
+                fullWidth
+                required
+                size="small"
+                type="tel"
+                placeholder="Enter 10-digit mobile number"
+                value={editFormData.phone}
+                onChange={(e) =>
+                  setEditFormData({
+                    ...editFormData,
+                    phone: e.target.value.replace(/\D/g, '').slice(0, 10),
+                  })
+                }
+                slotProps={{
+                  input: { sx: { fontSize: '13.5px', fontWeight: 500, borderRadius: '6px' } },
+                  htmlInput: {
+                    maxLength: 10,
+                    inputMode: 'numeric',
+                    pattern: '[0-9]{10}',
+                  },
                 }}
               />
             </Box>

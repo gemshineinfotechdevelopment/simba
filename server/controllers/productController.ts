@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
+import mongoose from 'mongoose';
 import { Product } from '../models/Product';
 
 const parseOptionalNonNegativeNumber = (
@@ -71,11 +72,24 @@ const buildProductPayload = (
   if (body.measurement !== undefined) {
     payload.measurement = body.measurement === null ? '' : String(body.measurement).trim();
   }
+  if (body.companyName !== undefined) {
+    payload.companyName = body.companyName === null ? '' : String(body.companyName).trim();
+  }
+  if (body.companyId !== undefined) {
+    payload.companyId =
+      body.companyId && mongoose.Types.ObjectId.isValid(String(body.companyId))
+        ? String(body.companyId)
+        : null;
+  }
   if (body.code !== undefined) {
     payload.code = body.code === null ? '' : String(body.code).trim();
   }
   if (body.category !== undefined) {
     payload.category = body.category === null ? '' : String(body.category).trim();
+  }
+  const rawCase = body.caseCount !== undefined ? body.caseCount : body.case;
+  if (rawCase !== undefined) {
+    payload.caseCount = rawCase === null ? '' : String(rawCase).trim();
   }
   if (body.pktUnit !== undefined) {
     payload.pktUnit = body.pktUnit === null ? '' : String(body.pktUnit).trim();
@@ -121,6 +135,44 @@ export const createProduct = async (req: Request, res: Response, next: NextFunct
 
     const product = await Product.create(built.data);
     res.status(201).json({ success: true, data: product });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const bulkCreateProducts = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { companyId, companyName, products } = req.body || {};
+    if (!Array.isArray(products) || products.length === 0) {
+      res.status(400).json({ success: false, error: 'Please provide at least one product to upload' });
+      return;
+    }
+
+    const last = await Product.findOne().sort({ slNo: -1 }).select('slNo').lean();
+    let nextSlNo = (last?.slNo || 0) + 1;
+
+    const docsToInsert: Record<string, unknown>[] = [];
+    for (let i = 0; i < products.length; i += 1) {
+      const rawItem = products[i] && typeof products[i] === 'object' ? products[i] : {};
+      const mergedItem = {
+        ...rawItem,
+        companyId: rawItem.companyId ?? companyId ?? null,
+        companyName: rawItem.companyName ?? companyName ?? '',
+      };
+      const built = buildProductPayload(mergedItem, false);
+      if (!built.valid) {
+        res.status(400).json({ success: false, error: `Row ${i + 1}: ${built.error}` });
+        return;
+      }
+      if (built.data.slNo === undefined) {
+        built.data.slNo = nextSlNo;
+        nextSlNo += 1;
+      }
+      docsToInsert.push(built.data);
+    }
+
+    const created = await Product.insertMany(docsToInsert);
+    res.status(201).json({ success: true, count: created.length, data: created });
   } catch (error) {
     next(error);
   }

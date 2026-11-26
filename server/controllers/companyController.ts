@@ -117,12 +117,27 @@ export const getCompanyById = async (req: Request, res: Response, next: NextFunc
   }
 };
 
+const normalizeValidatedPhone = (rawPhone: unknown): { valid: boolean; value: string } => {
+  const digits = rawPhone ? String(rawPhone).replace(/\D/g, '') : '';
+  if (!/^\d{10}$/.test(digits)) {
+    return { valid: false, value: '' };
+  }
+  return { valid: true, value: digits };
+};
+
 export const createCompany = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
+    const phoneCheck = normalizeValidatedPhone(req.body.phone);
+    if (!phoneCheck.valid) {
+      res.status(400).json({ success: false, error: 'Valid 10-digit mobile number is required' });
+      return;
+    }
+
     const finalSlNo = await getNextCompanySlNo(req.body.slNo);
 
     const company = await Company.create({
       ...req.body,
+      phone: phoneCheck.value,
       slNo: finalSlNo,
     });
     res.status(201).json({ success: true, data: company });
@@ -140,6 +155,15 @@ export const updateCompany = async (req: Request, res: Response, next: NextFunct
     }
     const oldName = oldCompany.name;
 
+    if (req.body.phone !== undefined) {
+      const phoneCheck = normalizeValidatedPhone(req.body.phone);
+      if (!phoneCheck.valid) {
+        res.status(400).json({ success: false, error: 'Valid 10-digit mobile number is required' });
+        return;
+      }
+      req.body.phone = phoneCheck.value;
+    }
+
     if (req.body.slNo) {
       req.body.slNo = await getNextCompanySlNo(req.body.slNo, String(req.params.id));
     }
@@ -153,12 +177,22 @@ export const updateCompany = async (req: Request, res: Response, next: NextFunct
       const escapedOldName = escapeRegex(oldName.trim());
       const { Particular } = await import('../models/Particular');
       const { AccountLedger } = await import('../models/AccountLedger');
+      const { Product } = await import('../models/Product');
       await Particular.updateMany(
         { companyName: { $regex: new RegExp(`^${escapedOldName}$`, 'i') } },
         { companyName: newName }
       );
       await AccountLedger.updateMany(
         { companyName: { $regex: new RegExp(`^${escapedOldName}$`, 'i') } },
+        { companyName: newName }
+      );
+      await Product.updateMany(
+        {
+          $or: [
+            { companyId: company._id },
+            { companyName: { $regex: new RegExp(`^${escapedOldName}$`, 'i') } },
+          ],
+        },
         { companyName: newName }
       );
     }

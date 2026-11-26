@@ -2,6 +2,7 @@ import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IParticularProductItem {
   particular: string;
+  companyName?: string;
   quantity: string;
   rate: string;
   pktUnit: string;
@@ -31,6 +32,7 @@ export interface IParticular extends Document {
 
 const ParticularProductItemSchema: Schema = new Schema({
   particular: { type: String, required: true },
+  companyName: { type: String, trim: true, default: '' },
   quantity: { type: String, default: '' },
   rate: { type: String, default: '' },
   pktUnit: { type: String, default: '' },

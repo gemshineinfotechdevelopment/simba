@@ -41,6 +41,14 @@ import { printCustomerListDirectly } from '../utils/printUtils';
 import { shareLedgerOnWhatsApp } from '../utils/whatsappUtils';
 import { DateRangePrintModal } from './DateRangePrintModal';
 import { DatePickerField } from './DatePickerField';
+import {
+  INDIAN_STATES,
+  TAX_PROOF_OPTIONS,
+  getTaxProofMeta,
+  inferTaxProofType,
+  resolveProofInputChange,
+  type TaxProofType,
+} from '../utils/customerProofs';
 
 export interface CustomerFinancial {
   _id?: string;
@@ -53,6 +61,8 @@ export interface CustomerFinancial {
   address: string;
   mobile: string;
   gst: string;
+  taxIdType?: TaxProofType;
+  state?: string;
   totalDebit?: number;
   totalCredit?: number;
   pendingDue?: number;
@@ -84,10 +94,19 @@ export const AllCustomersPage: FC<AllCustomersPageProps> = ({
   // Edit Customer Dialog State
   const [openEditModal, setOpenEditModal] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<CustomerFinancial | null>(null);
-  const [editFormData, setEditFormData] = useState({
+  const [editFormData, setEditFormData] = useState<{
+    name: string;
+    mobile: string;
+    taxIdType: TaxProofType;
+    gst: string;
+    state: string;
+    address: string;
+  }>({
     name: '',
     mobile: '',
+    taxIdType: 'GSTIN',
     gst: '',
+    state: '',
     address: '',
   });
   const [editLoading, setEditLoading] = useState(false);
@@ -179,10 +198,13 @@ export const AllCustomersPage: FC<AllCustomersPageProps> = ({
 
   const handleOpenEdit = (customer: CustomerFinancial) => {
     setEditingCustomer(customer);
+    const cleanedProof = customer.gst && customer.gst !== 'N/A' ? customer.gst : '';
     setEditFormData({
       name: customer.name || '',
-      mobile: customer.mobile || '',
-      gst: customer.gst || '',
+      mobile: customer.mobile && customer.mobile !== 'N/A' ? customer.mobile.replace(/\D/g, '').slice(0, 10) : '',
+      taxIdType: inferTaxProofType(cleanedProof, customer.taxIdType),
+      gst: cleanedProof,
+      state: customer.state || '',
       address: customer.address || '',
     });
     setOpenEditModal(true);
@@ -193,8 +215,13 @@ export const AllCustomersPage: FC<AllCustomersPageProps> = ({
     const id = editingCustomer._id || editingCustomer.id;
     if (!id) return;
 
-    if (!editFormData.name.trim() || !editFormData.address.trim()) {
-      alert('Please fill in Customer Name and Address');
+    const mobileDigits = editFormData.mobile.replace(/\D/g, '');
+    if (!editFormData.name.trim() || !mobileDigits || !editFormData.address.trim()) {
+      alert('Please fill in Customer Name, Mobile Number, and Address');
+      return;
+    }
+    if (mobileDigits.length !== 10) {
+      alert('Please enter a valid 10-digit mobile number');
       return;
     }
 
@@ -202,8 +229,10 @@ export const AllCustomersPage: FC<AllCustomersPageProps> = ({
       setEditLoading(true);
       await CustomersApi.update(id, {
         name: editFormData.name.trim(),
-        mobile: editFormData.mobile.trim() || 'N/A',
+        mobile: mobileDigits,
+        taxIdType: editFormData.taxIdType,
         gst: editFormData.gst.trim() || 'N/A',
+        state: editFormData.state.trim(),
         address: editFormData.address.trim(),
         avatarLetter: editFormData.name.trim().charAt(0).toUpperCase(),
       });
@@ -298,6 +327,7 @@ export const AllCustomersPage: FC<AllCustomersPageProps> = ({
           c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
           (c.address && c.address.toLowerCase().includes(searchTerm.toLowerCase())) ||
           (c.gst && c.gst.toLowerCase().includes(searchTerm.toLowerCase())) ||
+          (c.state && c.state.toLowerCase().includes(searchTerm.toLowerCase())) ||
           (c.mobile && c.mobile.includes(searchTerm)) ||
           (c.idCode && c.idCode.toLowerCase().includes(searchTerm.toLowerCase()));
 
@@ -1057,10 +1087,11 @@ export const AllCustomersPage: FC<AllCustomersPageProps> = ({
                       >
                         <Typography sx={{ fontSize: '13px', color: '#334155', fontWeight: 500, maxWidth: '240px' }}>
                           {customer.address}
+                          {customer.state ? `, ${customer.state}` : ''}
                         </Typography>
                         {customer.gst && customer.gst !== 'N/A' && (
                           <Typography sx={{ fontSize: '11.5px', color: '#64748B', fontWeight: 600, mt: 0.2 }}>
-                            GSTIN: {customer.gst}
+                            {getTaxProofMeta(inferTaxProofType(customer.gst, customer.taxIdType)).shortLabel}: {customer.gst}
                           </Typography>
                         )}
                       </TableCell>
@@ -1546,31 +1577,91 @@ export const AllCustomersPage: FC<AllCustomersPageProps> = ({
 
             <Box>
               <Typography sx={{ fontSize: '13px', fontWeight: 600, color: '#475569', mb: 0.5 }}>
-                Mobile Number
+                Mobile Number *
               </Typography>
               <TextField
                 fullWidth
+                required
                 size="small"
+                type="tel"
+                placeholder="Enter 10-digit mobile number"
                 value={editFormData.mobile}
-                onChange={(e) => setEditFormData({ ...editFormData, mobile: e.target.value })}
+                onChange={(e) =>
+                  setEditFormData({
+                    ...editFormData,
+                    mobile: e.target.value.replace(/\D/g, '').slice(0, 10),
+                  })
+                }
                 slotProps={{
+                  htmlInput: { maxLength: 10, inputMode: 'numeric' },
                   input: { sx: { fontSize: '13.5px', fontWeight: 500, borderRadius: '6px' } },
                 }}
               />
             </Box>
 
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1.5 }}>
+              <Box>
+                <Typography sx={{ fontSize: '13px', fontWeight: 600, color: '#475569', mb: 0.5 }}>
+                  Tax / ID Proof Type
+                </Typography>
+                <Autocomplete
+                  disableClearable
+                  openOnFocus
+                  size="small"
+                  options={TAX_PROOF_OPTIONS}
+                  getOptionLabel={(opt) => opt.menuLabel}
+                  isOptionEqualToValue={(a, b) => a.type === b.type}
+                  value={getTaxProofMeta(editFormData.taxIdType)}
+                  onChange={(_e, val) => {
+                    if (!val) return;
+                    setEditFormData((prev) => ({
+                      ...prev,
+                      taxIdType: val.type,
+                      gst: prev.taxIdType === val.type ? prev.gst : '',
+                    }));
+                  }}
+                  renderInput={(params) => <TextField {...params} />}
+                />
+              </Box>
+
+              <Box>
+                <Typography sx={{ fontSize: '13px', fontWeight: 600, color: '#475569', mb: 0.5 }}>
+                  {getTaxProofMeta(editFormData.taxIdType).inputLabel}
+                </Typography>
+                <TextField
+                  fullWidth
+                  size="small"
+                  placeholder={getTaxProofMeta(editFormData.taxIdType).placeholder}
+                  value={editFormData.gst}
+                  onChange={(e) => {
+                    setEditFormData((prev) => {
+                      const next = resolveProofInputChange(prev.taxIdType, e.target.value, prev.state);
+                      return { ...prev, gst: next.value, state: next.state };
+                    });
+                  }}
+                  slotProps={{
+                    input: { sx: { fontSize: '13.5px', fontWeight: 500, borderRadius: '6px' } },
+                    htmlInput: {
+                      maxLength: getTaxProofMeta(editFormData.taxIdType).maxLength,
+                    },
+                  }}
+                />
+              </Box>
+            </Box>
+
             <Box>
               <Typography sx={{ fontSize: '13px', fontWeight: 600, color: '#475569', mb: 0.5 }}>
-                GSTIN
+                State
               </Typography>
-              <TextField
-                fullWidth
+              <Autocomplete
+                openOnFocus
                 size="small"
-                value={editFormData.gst}
-                onChange={(e) => setEditFormData({ ...editFormData, gst: e.target.value })}
-                slotProps={{
-                  input: { sx: { fontSize: '13.5px', fontWeight: 500, borderRadius: '6px' } },
-                }}
+                options={INDIAN_STATES}
+                value={editFormData.state || null}
+                onChange={(_e, val) => setEditFormData((prev) => ({ ...prev, state: val || '' }))}
+                renderInput={(params) => (
+                  <TextField {...params} placeholder="Select or search state..." />
+                )}
               />
             </Box>
 

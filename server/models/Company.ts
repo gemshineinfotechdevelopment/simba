@@ -7,6 +7,7 @@ export interface ICompany extends Document {
   avatarBg?: string;
   avatarColor?: string;
   address: string;
+  phone?: string;
   gstin: string;
   createdAt: Date;
   updatedAt: Date;
@@ -20,6 +21,7 @@ const CompanySchema: Schema = new Schema(
     avatarBg: { type: String, default: '#DBEAFE' },
     avatarColor: { type: String, default: '#0B4DB7' },
     address: { type: String, required: true, trim: true },
+    phone: { type: String, trim: true, default: '' },
     gstin: { type: String, required: true, trim: true },
   },
   { timestamps: true }

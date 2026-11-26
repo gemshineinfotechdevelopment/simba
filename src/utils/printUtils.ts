@@ -1,5 +1,6 @@
 import type { BillPrintData } from '../components/BillPrintTemplate';
-import { calculateBillCharges } from './chargeUtils';
+import { calculateBillCharges, formatChargeDisplay } from './chargeUtils';
+import { summarizePerformaProductSpecs } from './measurements';
 
 /**
  * Robust date parser supporting DD-MM-YYYY, YYYY-MM-DD, DD/MM/YYYY, ISO, etc.
@@ -83,8 +84,10 @@ export const generateBillHtml = (bill: BillPrintData): string => {
         : `Packing (₹${packingParsed.num.toLocaleString('en-IN')})`
       : 'Packing Charges';
 
-  const taxLabel =
-    taxParsed.num > 0
+  const rawTaxStr = String(bill.tax ?? '').trim();
+  const taxLabel = rawTaxStr.includes('+')
+    ? `Tax (${formatChargeDisplay(rawTaxStr)})`
+    : taxParsed.num > 0
       ? taxParsed.isPercent
         ? `Tax (${taxParsed.cleanNum}%)`
         : `Tax Amount (₹${taxParsed.num.toLocaleString('en-IN')})`
@@ -100,18 +103,34 @@ export const generateBillHtml = (bill: BillPrintData): string => {
     ? bill.caseCount
     : (bill.products || []).reduce((acc, p) => acc + (parseFloat(String(p.quantity)) || 0), 0);
 
+  const hasCaseData =
+    (parseFloat(String(bill.caseCount || 0)) > 0) ||
+    (bill.products || []).some((p) => {
+      const q = String(p.quantity ?? '').trim();
+      return q !== '' && q !== '-' && parseFloat(q) > 0;
+    });
+
+  const hasMixedCompanies =
+    new Set(
+      (bill.products || []).map((p) => (p.companyName || '').trim().toLowerCase()).filter(Boolean)
+    ).size > 1;
+
   const transportName = bill.transport && bill.transport.trim() !== '' && bill.transport !== '-' ? bill.transport.trim() : '-';
   const receiptSrc = bill.pdfData || bill.pdfUrl || '';
 
   const productRowsHtml = (bill.products || []).map((item, idx) => {
     const numAmt = parseFloat(String(item.amount).replace(/,/g, '')) || 0;
     const isEven = idx % 2 === 1;
+    const brandBadge =
+      hasMixedCompanies && item.companyName && item.companyName.trim()
+        ? `<div style="font-size:10px; font-weight:600; color:#475569; margin-top:2px;">${item.companyName.trim()}</div>`
+        : '';
     return `
       <tr style="background-color: ${isEven ? '#F8FAFC' : '#FFFFFF'};">
         <td style="border: 1px solid #CBD5E1; padding: 7px 8px; text-align: center; color: #475569; font-weight: 600;">${idx + 1}</td>
-        <td style="border: 1px solid #CBD5E1; padding: 7px 10px; text-align: left; font-weight: 700; color: #0F172A;">${item.particular || '-'}</td>
+        <td style="border: 1px solid #CBD5E1; padding: 7px 10px; text-align: left; font-weight: 700; color: #0F172A;">${item.particular || '-'}${brandBadge}</td>
         <td style="border: 1px solid #CBD5E1; padding: 7px 8px; text-align: center; color: #475569; font-weight: 600;">${item.measurement && item.measurement.trim() ? item.measurement : '-'}</td>
-        <td style="border: 1px solid #CBD5E1; padding: 7px 8px; text-align: center; font-weight: 700; color: #0F172A;">${item.quantity || '-'}</td>
+        ${hasCaseData ? `<td style="border: 1px solid #CBD5E1; padding: 7px 8px; text-align: center; font-weight: 700; color: #0F172A;">${item.quantity || '-'}</td>` : ''}
         <td style="border: 1px solid #CBD5E1; padding: 7px 8px; text-align: right; color: #334155;">₹ ${(parseFloat(String(item.rate)) || 0).toFixed(2)}</td>
         <td style="border: 1px solid #CBD5E1; padding: 7px 8px; text-align: center; color: #64748B;">${item.pktUnit && item.pktUnit !== '-' ? item.pktUnit : '-'}</td>
         <td style="border: 1px solid #CBD5E1; padding: 7px 10px; text-align: right; font-weight: 800; color: #0F172A;">₹ ${numAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
@@ -342,7 +361,7 @@ export const generateBillHtml = (bill: BillPrintData): string => {
       </div>
       <div>
         <div class="meta-row"><span class="meta-label">Date:</span><span class="meta-val">${bill.date || '-'}</span></div>
-        <div class="meta-row"><span class="meta-label">Total Cases:</span><span class="meta-val" style="font-size:13.5px; color:#0B4DB7;">${computedCases}</span></div>
+        ${hasCaseData ? `<div class="meta-row"><span class="meta-label">Total Cases:</span><span class="meta-val" style="font-size:13.5px; color:#0B4DB7;">${computedCases}</span></div>` : ''}
         <div class="meta-row"><span class="meta-label">Phone:</span><span class="meta-val">${bill.phone || '+91 98765 43210'}</span></div>
       </div>
     </div>
@@ -354,14 +373,14 @@ export const generateBillHtml = (bill: BillPrintData): string => {
           <th style="width: 40px; text-align: center;">#</th>
           <th style="text-align: left;">Particular / Product Description</th>
           <th style="width: 75px; text-align: center;">Meas.</th>
-          <th style="width: 70px; text-align: center;">Cases</th>
+          ${hasCaseData ? '<th style="width: 70px; text-align: center;">Cases</th>' : ''}
           <th style="width: 85px; text-align: right;">Rate (₹)</th>
           <th style="width: 75px; text-align: center;">Pkt / Unit</th>
           <th style="width: 105px; text-align: right;">Amount (₹)</th>
         </tr>
       </thead>
       <tbody>
-        ${productRowsHtml || '<tr><td colspan="7" style="text-align:center; padding:16px; color:#64748B;">No product items attached.</td></tr>'}
+        ${productRowsHtml || `<tr><td colspan="${hasCaseData ? 7 : 6}" style="text-align:center; padding:16px; color:#64748B;">No product items attached.</td></tr>`}
       </tbody>
     </table>
 
@@ -1384,7 +1403,7 @@ export const generateParticularsListPrintHtml = (particulars: any[], dateRangeTe
 
       const discStr = p.discount && String(p.discount).trim() !== '' && p.discount !== '0' && p.discount !== '-' ? String(p.discount) : '-';
       const packStr = p.packing && String(p.packing).trim() !== '' && p.packing !== '0' && p.packing !== '-' ? String(p.packing) : '-';
-      const taxStr = p.tax && String(p.tax).trim() !== '' && p.tax !== '0' && p.tax !== '-' ? `₹${p.tax}` : '-';
+      const taxStr = formatChargeDisplay(p.tax);
 
       return `
         <tr class="data-row" style="background-color: ${isEven ? '#F8FAFC' : '#FFFFFF'};">
@@ -1762,6 +1781,7 @@ export const generateCompaniesListPrintHtml = (companies: any[]): string => {
     <tr style="background-color: ${isEven ? '#F8FAFC' : '#FFFFFF'};">
       <td class="text-center" style="width:40px; border: 1px solid #CBD5E1; padding: 6px;">${idx + 1}</td>
       <td style="font-weight:700; color:#0F172A; border: 1px solid #CBD5E1; padding: 6px 8px;">${c.name}</td>
+      <td style="color:#334155; border: 1px solid #CBD5E1; padding: 6px 8px;">${c.phone || '-'}</td>
       <td style="color:#334155; border: 1px solid #CBD5E1; padding: 6px 8px;">${c.gstin || '-'}</td>
       <td style="color:#475569; border: 1px solid #CBD5E1; padding: 6px 8px;">${c.address || '-'}</td>
     </tr>
@@ -1801,12 +1821,13 @@ export const generateCompaniesListPrintHtml = (companies: any[]): string => {
       <tr>
         <th class="text-center">#</th>
         <th>Company Name</th>
+        <th>Phone</th>
         <th>GSTIN</th>
         <th>Address</th>
       </tr>
     </thead>
     <tbody>
-      ${rowsHtml || '<tr><td colspan="4" class="text-center" style="padding:16px;">No companies found.</td></tr>'}
+      ${rowsHtml || '<tr><td colspan="5" class="text-center" style="padding:16px;">No companies found.</td></tr>'}
     </tbody>
   </table>
 </body>
@@ -1822,7 +1843,7 @@ export const printCompaniesListDirectly = (companies: any[]) => {
 /**
  * Print Products List (A4 Standard)
  */
-export const generateProductsListPrintHtml = (products: any[]): string => {
+export const generateProductsListPrintHtml = (products: any[], companyFilterName?: string): string => {
   const currentDate = new Date().toLocaleDateString('en-GB').replace(/\//g, '-');
   const rowsHtml = products.map((p, idx) => {
     const isEven = idx % 2 === 1;
@@ -1839,13 +1860,19 @@ export const generateProductsListPrintHtml = (products: any[]): string => {
     <tr style="background-color: ${isEven ? '#F8FAFC' : '#FFFFFF'};">
       <td class="text-center" style="width:40px; border: 1px solid #CBD5E1; padding: 6px;">${p.slNo || idx + 1}</td>
       <td style="font-weight:700; color:#0F172A; border: 1px solid #CBD5E1; padding: 6px 8px;">${p.name}</td>
-      <td class="text-center" style="color:#475569; border: 1px solid #CBD5E1; padding: 6px;">${p.hsnCode || '-'}</td>
+      ${companyFilterName ? '' : `<td style="color:#475569; border: 1px solid #CBD5E1; padding: 6px 8px;">${p.companyName || '-'}</td>`}
       <td class="text-center" style="color:#475569; border: 1px solid #CBD5E1; padding: 6px;">${p.measurement || '-'}</td>
-      <td class="text-center" style="color:#475569; border: 1px solid #CBD5E1; padding: 6px;">${gstText}</td>
+      <td class="text-center" style="color:#475569; border: 1px solid #CBD5E1; padding: 6px;">${p.hsnCode || '-'}</td>
+      <td class="text-center" style="color:#475569; border: 1px solid #CBD5E1; padding: 6px;">${p.pktUnit || '-'}</td>
       <td style="text-align:right; font-weight:700; color:#0B4DB7; border: 1px solid #CBD5E1; padding: 6px 8px;">${formattedAmount}</td>
+      <td class="text-center" style="color:#475569; border: 1px solid #CBD5E1; padding: 6px;">${gstText}</td>
     </tr>
   `;
   }).join('');
+
+  const headingTitle = companyFilterName
+    ? `${companyFilterName.toUpperCase()} — PRODUCTS CATALOG`
+    : 'PRODUCTS PRICE CATALOG';
 
   return `
 <!DOCTYPE html>
@@ -1868,7 +1895,7 @@ export const generateProductsListPrintHtml = (products: any[]): string => {
   <div class="header">
     <div>
       <div style="font-size:24px; font-weight:900; color:#0B4DB7;">SIMBA</div>
-      <h2 style="font-size:15px; margin-top:2px;">PRODUCTS PRICE CATALOG</h2>
+      <h2 style="font-size:15px; margin-top:2px;">${headingTitle}</h2>
     </div>
     <div style="text-align:right; font-size:11.5px;">
       <div>Date: <b>${currentDate}</b></div>
@@ -1880,14 +1907,16 @@ export const generateProductsListPrintHtml = (products: any[]): string => {
       <tr>
         <th class="text-center">#</th>
         <th>Product Name</th>
-        <th class="text-center">HSN Code</th>
+        ${companyFilterName ? '' : '<th>Company</th>'}
         <th class="text-center">Measurement</th>
-        <th class="text-center">GST %</th>
+        <th class="text-center">HSN Code</th>
+        <th class="text-center">Pkts/Unit</th>
         <th style="text-align:right;">Amount</th>
+        <th class="text-center">GST %</th>
       </tr>
     </thead>
     <tbody>
-      ${rowsHtml || '<tr><td colspan="6" class="text-center" style="padding:16px;">No products found.</td></tr>'}
+      ${rowsHtml || `<tr><td colspan="${companyFilterName ? 7 : 8}" class="text-center" style="padding:16px;">No products found.</td></tr>`}
     </tbody>
   </table>
 </body>
@@ -1895,8 +1924,8 @@ export const generateProductsListPrintHtml = (products: any[]): string => {
   `;
 };
 
-export const printProductsListDirectly = (products: any[]) => {
-  const htmlContent = generateProductsListPrintHtml(products);
+export const printProductsListDirectly = (products: any[], companyFilterName?: string) => {
+  const htmlContent = generateProductsListPrintHtml(products, companyFilterName);
   triggerBrowserPrint(htmlContent);
 };
 
@@ -1970,6 +1999,13 @@ export const generatePerformaHtml = (performa: any): string => {
     0
   );
 
+  const hasCaseData =
+    Number(performa.totalRequiredCases || performa.totalCases || 0) > 0 ||
+    (performa.products || []).some((p: any) => (parseFloat(String(p.requiredCases || 0)) || 0) > 0);
+  const hasGstData = (performa.products || []).some(
+    (p: any) => (parseFloat(String(p.gstPercent || 0)) || 0) > 0
+  );
+
   const productRowsHtml = (performa.products || []).map((item: any, idx: number) => {
     const isEven = idx % 2 === 1;
     const prodName = item.productSnapshot?.productName || item.productName || item.particular || 'Product';
@@ -1977,7 +2013,11 @@ export const generatePerformaHtml = (performa: any): string => {
     const measVal = (item.measurement && String(item.measurement).trim()) || item.productSnapshot?.measurement || '-';
     const compName = (item.companyName && String(item.companyName).trim()) || item.productSnapshot?.companyName || performa.companyName || '';
     const rateVal = parseFloat(String(item.rate || 0)) || 0;
-    const allocatedVal = parseFloat(String(item.allocatedAmount || ((parseFloat(item.requiredCases) || 0) * rateVal * (parseFloat(item.pktPerUnit || item.pktUnit) || 1)))) || 0;
+    const reqCasesVal = parseFloat(String(item.requiredCases || 0)) || 0;
+    const gstVal = Math.max(0, parseFloat(String(item.gstPercent || 0)) || 0);
+    const baseAlloc = (reqCasesVal > 0 ? reqCasesVal : 1) * rateVal * (parseFloat(item.pktPerUnit || item.pktUnit) || 1);
+    const calcAlloc = gstVal > 0 ? baseAlloc * (1 + gstVal / 100) : baseAlloc;
+    const allocatedVal = parseFloat(String(item.allocatedAmount || calcAlloc)) || 0;
 
     return `
     <tr style="background-color: ${isEven ? '#F8FAFC' : '#FFFFFF'};">
@@ -1992,15 +2032,20 @@ export const generatePerformaHtml = (performa: any): string => {
       <td style="padding: 7px 8px; border: 1px solid #CBD5E1; color: #0B4DB7; font-weight: 600; font-size: 11.5px;">
         ${compName || '-'}
       </td>
+      ${hasCaseData ? `
       <td style="padding: 7px 6px; text-align: center; font-weight: 800; color: #0F172A; border: 1px solid #CBD5E1;">
         ${item.requiredCases}
-      </td>
+      </td>` : ''}
       <td style="padding: 7px 8px; text-align: right; border: 1px solid #CBD5E1; color: #334155;">
         ₹ ${formatCurrency(rateVal)}
       </td>
       <td style="padding: 7px 6px; text-align: center; border: 1px solid #CBD5E1; color: #64748B;">
         ${item.pktPerUnit || 1}
       </td>
+      ${hasGstData ? `
+      <td style="padding: 7px 6px; text-align: center; border: 1px solid #CBD5E1; color: #166534; font-weight: 700;">
+        ${gstVal > 0 ? `${gstVal}%` : '-'}
+      </td>` : ''}
       <td style="padding: 7px 10px; text-align: right; font-weight: 800; color: #0F172A; border: 1px solid #CBD5E1;">
         ₹ ${formatCurrency(allocatedVal)}
       </td>
@@ -2061,14 +2106,15 @@ export const generatePerformaHtml = (performa: any): string => {
               <th style="text-align: left;">Product Description</th>
               <th style="width: 75px; text-align: center;">Meas.</th>
               <th style="width: 100px; text-align: left;">Company</th>
-              <th style="width: 70px; text-align: center;">Total Cases</th>
+              ${hasCaseData ? '<th style="width: 70px; text-align: center;">Total Cases</th>' : ''}
               <th style="width: 80px; text-align: right;">Rate (₹)</th>
               <th style="width: 55px; text-align: center;">Units</th>
+              ${hasGstData ? '<th style="width: 55px; text-align: center;">GST %</th>' : ''}
               <th style="width: 105px; text-align: right;">Amount (₹)</th>
             </tr>
           </thead>
           <tbody>
-            ${productRowsHtml || '<tr><td colspan="8" style="text-align:center; padding:16px; color:#64748B;">No products allocated.</td></tr>'}
+            ${productRowsHtml || `<tr><td colspan="${7 + (hasCaseData ? 1 : 0) + (hasGstData ? 1 : 0)}" style="text-align:center; padding:16px; color:#64748B;">No products allocated.</td></tr>`}
           </tbody>
         </table>
 
@@ -2080,9 +2126,10 @@ export const generatePerformaHtml = (performa: any): string => {
           </div>
 
           <div class="summary-card">
+            ${hasCaseData ? `
             <div class="summary-row">
               <span style="color:#475569;">Total Cases:</span><strong style="color:#0F172A;">${performa.totalRequiredCases || performa.totalCases || 0}</strong>
-            </div>
+            </div>` : ''}
             <div class="summary-row">
               <span style="color:#475569;">Subtotal:</span><strong style="color:#0F172A;">₹ ${formatCurrency(subtotalVal)}</strong>
             </div>
@@ -2178,11 +2225,11 @@ export const generateAllPerformasPrintHtml = (performas: any[], reportTitle = 'P
   const PAGE_SIZE = 30;
   const totalPages = Math.max(1, Math.ceil(performas.length / PAGE_SIZE));
 
-  let overallTotalCases = 0;
+  let overallTotalUnits = 0;
   let overallTotalValue = 0;
 
   performas.forEach((p) => {
-    overallTotalCases += parseFloat(String(p.totalRequiredCases || p.totalCases || 0)) || 0;
+    overallTotalUnits += summarizePerformaProductSpecs(p).totalUnits;
     overallTotalValue += parseFloat(String(p.totalAllocatedAmount || p.totalAmount || 0)) || 0;
   });
 
@@ -2192,18 +2239,18 @@ export const generateAllPerformasPrintHtml = (performas: any[], reportTitle = 'P
     const isFirstPage = pageIdx === 0;
     const isFinalPage = pageIdx === totalPages - 1;
 
-    let pageCases = 0;
+    let pageUnits = 0;
     let pageValue = 0;
 
     pageItems.forEach((p) => {
-      pageCases += parseFloat(String(p.totalRequiredCases || p.totalCases || 0)) || 0;
+      pageUnits += summarizePerformaProductSpecs(p).totalUnits;
       pageValue += parseFloat(String(p.totalAllocatedAmount || p.totalAmount || 0)) || 0;
     });
 
     const pageRowsHtml = pageItems.map((p, localIdx) => {
       const globalIdx = startIndex + localIdx;
       const isEven = localIdx % 2 === 1;
-      const cases = parseFloat(String(p.totalRequiredCases || p.totalCases || 0)) || 0;
+      const { measurementText, unitsText } = summarizePerformaProductSpecs(p);
       const value = parseFloat(String(p.totalAllocatedAmount || p.totalAmount || 0)) || 0;
       const custName = p.customerSnapshot?.name || p.customerName || '-';
       const compName = p.companyName || p.customerSnapshot?.companyName || '-';
@@ -2212,12 +2259,13 @@ export const generateAllPerformasPrintHtml = (performas: any[], reportTitle = 'P
         <tr class="data-row" style="background-color: ${isEven ? '#F8FAFC' : '#FFFFFF'};">
           <td class="text-center" style="width:30px;">${globalIdx + 1}</td>
           <td class="text-center" style="font-weight:800; color:#0B4DB7; width:65px;">#${p.performaNumber || '-'}</td>
-          <td class="text-center" style="width:75px; color:#334155;">${p.date || '-'}</td>
-          <td style="font-weight:700; color:#0F172A; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px;">${custName}</td>
-          <td style="color:#475569; font-size:9.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px;">${compName}</td>
-          <td class="text-center" style="width:50px; font-weight:800;">${cases}</td>
-          <td class="text-center" style="width:70px; font-size:9.5px; font-weight:700; color:${p.status === 'ACTIVE' ? '#16A34A' : '#0B4DB7'};">${p.status || 'ACTIVE'}</td>
-          <td class="text-right" style="font-weight:800; width:110px; color:#0F172A;">₹ ${value.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+          <td class="text-center" style="width:70px; color:#334155;">${p.date || '-'}</td>
+          <td style="font-weight:700; color:#0F172A; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 145px;">${custName}</td>
+          <td style="color:#475569; font-size:9.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 115px;">${compName}</td>
+          <td class="text-center" style="width:80px; color:#334155; font-size:9.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${measurementText}</td>
+          <td class="text-center" style="width:55px; font-weight:800;">${unitsText}</td>
+          <td class="text-center" style="width:65px; font-size:9.5px; font-weight:700; color:${p.status === 'ACTIVE' ? '#16A34A' : '#0B4DB7'};">${p.status || 'ACTIVE'}</td>
+          <td class="text-right" style="font-weight:800; width:105px; color:#0F172A;">₹ ${value.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
         </tr>
       `;
     }).join('');
@@ -2249,8 +2297,8 @@ export const generateAllPerformasPrintHtml = (performas: any[], reportTitle = 'P
             <div class="kpi-val">${performas.length}</div>
           </div>
           <div class="kpi-card">
-            <div class="kpi-title">Total Cases</div>
-            <div class="kpi-val" style="color:#0B4DB7;">${overallTotalCases}</div>
+            <div class="kpi-title">Total Units/Pkt</div>
+            <div class="kpi-val" style="color:#0B4DB7;">${Number(overallTotalUnits.toFixed(2))}</div>
           </div>
           <div class="kpi-card">
             <div class="kpi-title">Total Allocated Value</div>
@@ -2279,22 +2327,23 @@ export const generateAllPerformasPrintHtml = (performas: any[], reportTitle = 'P
             <tr>
               <th class="text-center" style="width:30px;">#</th>
               <th class="text-center" style="width:65px;">Performa #</th>
-              <th class="text-center" style="width:75px;">Date</th>
-              <th style="width:180px;">Customer Name</th>
-              <th style="width:150px;">Company</th>
-              <th class="text-center" style="width:50px;">Cases</th>
-              <th class="text-center" style="width:70px;">Status</th>
-              <th class="text-right" style="width:110px;">Total Value</th>
+              <th class="text-center" style="width:70px;">Date</th>
+              <th style="width:145px;">Customer Name</th>
+              <th style="width:115px;">Company</th>
+              <th class="text-center" style="width:80px;">Measurement</th>
+              <th class="text-center" style="width:55px;">Units/Pkt</th>
+              <th class="text-center" style="width:65px;">Status</th>
+              <th class="text-right" style="width:105px;">Total Value</th>
             </tr>
           </thead>
           <tbody>
-            ${pageRowsHtml || '<tr><td colspan="8" class="text-center" style="padding:18px; color:#64748B;">No performa records found for the selected period.</td></tr>'}
+            ${pageRowsHtml || '<tr><td colspan="9" class="text-center" style="padding:18px; color:#64748B;">No performa records found for the selected period.</td></tr>'}
           </tbody>
           <tfoot>
             <!-- Page Total Row (Bottom of EVERY page) -->
             <tr class="page-total-row">
-              <td colspan="5" class="text-right" style="padding-right:8px;">PAGE ${pageIdx + 1} TOTAL (${pageItems.length} Performas):</td>
-              <td class="text-center">${pageCases}</td>
+              <td colspan="6" class="text-right" style="padding-right:8px;">PAGE ${pageIdx + 1} TOTAL (${pageItems.length} Performas):</td>
+              <td class="text-center">${Number(pageUnits.toFixed(2))}</td>
               <td></td>
               <td class="text-right">₹ ${pageValue.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
             </tr>
@@ -2304,8 +2353,8 @@ export const generateAllPerformasPrintHtml = (performas: any[], reportTitle = 'P
               isFinalPage
                 ? `
             <tr class="grand-total-row">
-              <td colspan="5" class="text-right" style="padding-right:8px;">OVERALL GRAND TOTAL (${performas.length} Performas):</td>
-              <td class="text-center">${overallTotalCases}</td>
+              <td colspan="6" class="text-right" style="padding-right:8px;">OVERALL GRAND TOTAL (${performas.length} Performas):</td>
+              <td class="text-center">${Number(overallTotalUnits.toFixed(2))}</td>
               <td></td>
               <td class="text-right">₹ ${overallTotalValue.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
             </tr>`

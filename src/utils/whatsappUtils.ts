@@ -9,6 +9,7 @@ import {
 } from './printUtils';
 import type { BillPrintData } from '../components/BillPrintTemplate';
 import { formatChargeDisplay } from './chargeUtils';
+import { summarizePerformaProductSpecs } from './measurements';
 
 /**
  * Normalizes phone numbers for WhatsApp (adds 91 if 10-digit Indian number)
@@ -189,10 +190,22 @@ export const shareToWhatsApp = async (options: {
  * 1. Share Particular Bill on WhatsApp
  */
 export const shareBillOnWhatsApp = async (bill: BillPrintData, phone?: string) => {
+  const hasCaseData =
+    (parseFloat(String(bill.caseCount || 0)) > 0) ||
+    (bill.products || []).some((p) => {
+      const q = String(p.quantity ?? '').trim();
+      return q !== '' && q !== '-' && parseFloat(q) > 0;
+    });
+
+  const hasMixedCompanies =
+    new Set(
+      (bill.products || []).map((p) => (p.companyName || '').trim().toLowerCase()).filter(Boolean)
+    ).size > 1;
+
   const itemsText = (bill.products || [])
     .map(
       (p, i) =>
-        `${i + 1}. *${p.particular}*${p.measurement && p.measurement.trim() ? ` (${p.measurement})` : ''} - ${p.quantity} Cases @ ₹${p.rate}${p.pktUnit && p.pktUnit !== '-' ? ` (${p.pktUnit}/pkt)` : ''} = *₹${p.amount}*`
+        `${i + 1}. *${p.particular}*${hasMixedCompanies && p.companyName && p.companyName.trim() ? ` [${p.companyName.trim()}]` : ''}${p.measurement && p.measurement.trim() ? ` (${p.measurement})` : ''}${hasCaseData && p.quantity && p.quantity !== '-' ? ` - ${p.quantity} Cases` : ''} @ ₹${p.rate}${p.pktUnit && p.pktUnit !== '-' ? ` (${p.pktUnit}/pkt)` : ''} = *₹${p.amount}*`
     )
     .join('\n');
 
@@ -206,8 +219,7 @@ export const shareBillOnWhatsApp = async (bill: BillPrintData, phone?: string) =
 *Customer:* ${bill.customerName}
 ${bill.companyName && bill.companyName !== 'General' ? `*Company:* ${bill.companyName}\n` : ''}*Date:* ${bill.date}
 *Transport:* ${bill.transport || '-'}
-*Cases:* ${bill.caseCount || '-'}
-----------------------------------------
+${hasCaseData ? `*Cases:* ${bill.caseCount || '-'}\n` : ''}----------------------------------------
 *ITEMS:*
 ${itemsText || '-'}
 ----------------------------------------
@@ -347,6 +359,10 @@ export const sharePerformaOnWhatsApp = async (performa: any, phone?: string) => 
       ? performa.totalAllocatedAmount
       : performa.totalAmount || Math.max(0, subtotalVal - discountAmt + packingAmt + taxAmt);
 
+  const hasCaseData =
+    Number(totalCases) > 0 ||
+    (performa.products || []).some((p: any) => (parseFloat(String(p.requiredCases || 0)) || 0) > 0);
+
   const itemsText = (performa.products || [])
     .map((p: any, i: number) => {
       const pName = p.productSnapshot?.productName || p.productName || 'Product';
@@ -354,10 +370,12 @@ export const sharePerformaOnWhatsApp = async (performa: any, phone?: string) => 
       const measLabel = pMeas ? ` (${pMeas})` : '';
       const compName = p.productSnapshot?.companyName || p.companyName || '';
       const compLabel = compName ? ` [${compName}]` : '';
-      const pCases = p.requiredCases || 0;
+      const pCases = Number(p.requiredCases) || 0;
       const pRate = p.rate || 0;
-      const pAlloc = p.allocatedAmount || (Number(pCases) * Number(pRate) * (Number(p.pktPerUnit) || 1));
-      return `${i + 1}. *${pName}*${measLabel}${compLabel} - ${pCases} Cases @ ₹${pRate} = *₹${Number(pAlloc).toLocaleString('en-IN', { minimumFractionDigits: 2 })}*`;
+      const pGst = Math.max(0, Number(p.gstPercent) || 0);
+      const baseAlloc = (pCases > 0 ? pCases : 1) * Number(pRate) * (Number(p.pktPerUnit) || 1);
+      const pAlloc = p.allocatedAmount || (pGst > 0 ? baseAlloc * (1 + pGst / 100) : baseAlloc);
+      return `${i + 1}. *${pName}*${measLabel}${compLabel}${hasCaseData && pCases > 0 ? ` - ${pCases} Cases` : ''} @ ₹${pRate}${pGst > 0 ? ` (+${pGst}% GST)` : ''} = *₹${Number(pAlloc).toLocaleString('en-IN', { minimumFractionDigits: 2 })}*`;
     })
     .join('\n');
 
@@ -371,8 +389,7 @@ export const sharePerformaOnWhatsApp = async (performa: any, phone?: string) => 
 *PRODUCTS ALLOCATION:*
 ${itemsText || '-'}
 ----------------------------------------
-*Total Cases:* ${totalCases}
-*Subtotal:* ₹${subtotalVal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+${hasCaseData ? `*Total Cases:* ${totalCases}\n` : ''}*Subtotal:* ₹${subtotalVal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
 ${discountAmt > 0 ? `*Discount:* ${performa.discount ? `${performa.discount}${String(performa.discount).includes('%') ? '' : '%'}` : ''} (-₹${discountAmt.toLocaleString('en-IN', { minimumFractionDigits: 2 })})\n` : ''}${packingAmt > 0 ? `*Packing:* ${performa.packing ? `${performa.packing}${String(performa.packing).includes('%') ? '' : '%'}` : ''} (+₹${packingAmt.toLocaleString('en-IN', { minimumFractionDigits: 2 })})\n` : ''}${taxAmt > 0 ? `*Tax:* ₹${taxAmt.toLocaleString('en-IN', { minimumFractionDigits: 2 })}\n` : ''}*TOTAL ALLOCATED VALUE:* ₹${Number(totalAmount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
 ----------------------------------------
 *Simba*`;
@@ -398,14 +415,16 @@ export const shareAllPerformasOnWhatsApp = async (
   phone?: string
 ) => {
   const totalPerformas = performas.length;
-  const totalCases = performas.reduce((acc, p) => acc + (parseFloat(p.totalCases || p.totalRequiredCases) || 0), 0);
+  const totalUnits = Number(
+    performas.reduce((acc, p) => acc + summarizePerformaProductSpecs(p).totalUnits, 0).toFixed(2)
+  );
   const totalValue = performas.reduce((acc, p) => acc + (parseFloat(p.totalAmount || p.totalAllocatedAmount) || 0), 0);
 
   const text = `*SIMBA - PERFORMA SUMMARY* 📊
 ----------------------------------------
 *Title:* ${summaryTitle}
 *Total Performas:* ${totalPerformas}
-*Total Cases:* ${totalCases}
+*Total Units/Pkt:* ${totalUnits}
 *Total Value:* ₹${totalValue.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
 ----------------------------------------
 _Generated on ${new Date().toLocaleDateString('en-GB')}_

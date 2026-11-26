@@ -1,52 +1,114 @@
 import { useState, type FC, type ChangeEvent } from 'react';
 import {
+  Autocomplete,
   Box,
   Typography,
   Button,
   InputBase,
   Paper,
   CircularProgress,
+  TextField,
 } from '@mui/material';
 import AddCircleOutlineRoundedIcon from '@mui/icons-material/AddCircleOutlineRounded';
 import { CustomersApi } from '../services/api';
+import {
+  INDIAN_STATES,
+  TAX_PROOF_OPTIONS,
+  getTaxProofMeta,
+  resolveProofInputChange,
+  type TaxProofType,
+} from '../utils/customerProofs';
 
 interface AddCustomerPageProps {
   onCancel?: () => void;
   onSubmitSuccess?: () => void;
 }
 
+const dropdownFieldSx = {
+  '& .MuiOutlinedInput-root': {
+    height: '42px',
+    py: '0 !important',
+    backgroundColor: '#F8FAFC',
+    borderRadius: '8px',
+    fontSize: '13.5px',
+    fontWeight: 500,
+    color: '#0F172A',
+    transition: 'all 0.15s ease',
+    '& .MuiAutocomplete-input': {
+      py: '0 !important',
+    },
+    '& fieldset': {
+      borderColor: '#E2E8F0',
+    },
+    '&:hover fieldset': {
+      borderColor: '#CBD5E1',
+    },
+    '&.Mui-focused': {
+      backgroundColor: '#FFFFFF',
+      boxShadow: '0 0 0 3px rgba(11, 77, 183, 0.1)',
+    },
+    '&.Mui-focused fieldset': {
+      borderColor: '#0B4DB7',
+      borderWidth: '1px',
+    },
+  },
+};
+
 export const AddCustomerPage: FC<AddCustomerPageProps> = ({
   onCancel,
   onSubmitSuccess,
 }) => {
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<{
+    fullName: string;
+    mobileNumber: string;
+    taxIdType: TaxProofType;
+    gstin: string;
+    state: string;
+    billingAddress: string;
+  }>({
     fullName: '',
     mobileNumber: '',
+    taxIdType: 'GSTIN',
     gstin: '',
+    state: '',
     billingAddress: '',
   });
   const [loading, setLoading] = useState(false);
 
-  const handleChange = (field: string) => (
+  const activeProofMeta = getTaxProofMeta(formData.taxIdType);
+
+  const handleChange = (field: 'fullName' | 'mobileNumber' | 'gstin' | 'billingAddress') => (
     e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
   ) => {
     const rawValue = e.target.value;
-    const nextValue =
-      field === 'mobileNumber' ? rawValue.replace(/\D/g, '').slice(0, 10) : rawValue;
+    setFormData((prev) => {
+      if (field === 'mobileNumber') {
+        return { ...prev, mobileNumber: rawValue.replace(/\D/g, '').slice(0, 10) };
+      }
+      if (field === 'gstin') {
+        const next = resolveProofInputChange(prev.taxIdType, rawValue, prev.state);
+        return { ...prev, gstin: next.value, state: next.state };
+      }
+      return { ...prev, [field]: rawValue };
+    });
+  };
+
+  const handleProofTypeChange = (nextType: TaxProofType) => {
     setFormData((prev) => ({
       ...prev,
-      [field]: nextValue,
+      taxIdType: nextType,
+      gstin: prev.taxIdType === nextType ? prev.gstin : '',
     }));
   };
 
   const handleSubmit = async () => {
-    if (!formData.fullName.trim() || !formData.billingAddress.trim()) {
-      alert('Please fill in required fields (Full Name and Address)');
+    const mobileDigits = formData.mobileNumber.replace(/\D/g, '');
+    if (!formData.fullName.trim() || !mobileDigits || !formData.billingAddress.trim()) {
+      alert('Please fill in required fields (Full Name, Mobile Number, and Address)');
       return;
     }
 
-    const mobileDigits = formData.mobileNumber.replace(/\D/g, '');
-    if (mobileDigits.length > 0 && mobileDigits.length !== 10) {
+    if (mobileDigits.length !== 10) {
       alert('Please enter a valid 10-digit mobile number');
       return;
     }
@@ -55,8 +117,10 @@ export const AddCustomerPage: FC<AddCustomerPageProps> = ({
       setLoading(true);
       await CustomersApi.create({
         name: formData.fullName.trim(),
-        mobile: mobileDigits || 'N/A',
+        mobile: mobileDigits,
+        taxIdType: formData.taxIdType,
         gst: formData.gstin.trim() || 'N/A',
+        state: formData.state.trim(),
         address: formData.billingAddress.trim(),
         avatarLetter: formData.fullName.trim().charAt(0).toUpperCase(),
         avatarBg: '#DBEAFE',
@@ -193,7 +257,7 @@ export const AddCustomerPage: FC<AddCustomerPageProps> = ({
                   letterSpacing: '-0.01em',
                 }}
               >
-                Mobile Number
+                Mobile Number *
               </Typography>
               <Box
                 sx={{
@@ -214,8 +278,9 @@ export const AddCustomerPage: FC<AddCustomerPageProps> = ({
               >
                 <InputBase
                   fullWidth
+                  required
                   type="tel"
-                  placeholder="e.g. 9876543210"
+                  placeholder="Enter 10-digit mobile number"
                   value={formData.mobileNumber}
                   onChange={handleChange('mobileNumber')}
                   inputProps={{
@@ -236,7 +301,7 @@ export const AddCustomerPage: FC<AddCustomerPageProps> = ({
               </Box>
             </Box>
 
-            {/* GSTIN Field */}
+            {/* Tax / ID Proof Type */}
             <Box>
               <Typography
                 sx={{
@@ -247,7 +312,36 @@ export const AddCustomerPage: FC<AddCustomerPageProps> = ({
                   letterSpacing: '-0.01em',
                 }}
               >
-                GSTIN / Tax ID
+                Tax / ID Proof Type
+              </Typography>
+              <Autocomplete
+                disableClearable
+                openOnFocus
+                size="small"
+                options={TAX_PROOF_OPTIONS}
+                getOptionLabel={(opt) => opt.menuLabel}
+                isOptionEqualToValue={(a, b) => a.type === b.type}
+                value={activeProofMeta}
+                onChange={(_e, val) => {
+                  if (val) handleProofTypeChange(val.type);
+                }}
+                sx={dropdownFieldSx}
+                renderInput={(params) => <TextField {...params} />}
+              />
+            </Box>
+
+            {/* Dynamic Tax / ID Proof Number */}
+            <Box>
+              <Typography
+                sx={{
+                  fontSize: '13px',
+                  fontWeight: 700,
+                  color: '#1E293B',
+                  mb: 1,
+                  letterSpacing: '-0.01em',
+                }}
+              >
+                {activeProofMeta.inputLabel}
               </Typography>
               <Box
                 sx={{
@@ -268,9 +362,14 @@ export const AddCustomerPage: FC<AddCustomerPageProps> = ({
               >
                 <InputBase
                   fullWidth
-                  placeholder="e.g. 29ABCDE1234F1Z5"
+                  type={formData.taxIdType === 'AADHAAR' ? 'tel' : 'text'}
+                  placeholder={activeProofMeta.placeholder}
                   value={formData.gstin}
                   onChange={handleChange('gstin')}
+                  inputProps={{
+                    maxLength: activeProofMeta.maxLength,
+                    inputMode: formData.taxIdType === 'AADHAAR' ? 'numeric' : 'text',
+                  }}
                   sx={{
                     fontSize: '13.5px',
                     fontWeight: 500,
@@ -282,6 +381,32 @@ export const AddCustomerPage: FC<AddCustomerPageProps> = ({
                   }}
                 />
               </Box>
+            </Box>
+
+            {/* State Field */}
+            <Box>
+              <Typography
+                sx={{
+                  fontSize: '13px',
+                  fontWeight: 700,
+                  color: '#1E293B',
+                  mb: 1,
+                  letterSpacing: '-0.01em',
+                }}
+              >
+                State
+              </Typography>
+              <Autocomplete
+                openOnFocus
+                size="small"
+                options={INDIAN_STATES}
+                value={formData.state || null}
+                onChange={(_e, val) => setFormData((prev) => ({ ...prev, state: val || '' }))}
+                sx={dropdownFieldSx}
+                renderInput={(params) => (
+                  <TextField {...params} placeholder="Select or search state..." />
+                )}
+              />
             </Box>
 
             {/* Billing Address Field */}

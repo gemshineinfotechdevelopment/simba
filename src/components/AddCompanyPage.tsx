@@ -24,23 +24,33 @@ export const AddCompanyPage: FC<AddCompanyPageProps> = ({
 }) => {
   const [formData, setFormData] = useState({
     companyName: '',
+    phoneNumber: '',
     gstNumber: '',
     registeredAddress: '',
   });
   const [loading, setLoading] = useState(false);
 
-  const handleChange = (field: string) => (
+  const handleChange = (field: 'companyName' | 'phoneNumber' | 'gstNumber' | 'registeredAddress') => (
     e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
   ) => {
+    const rawValue = e.target.value;
+    const nextValue =
+      field === 'phoneNumber' ? rawValue.replace(/\D/g, '').slice(0, 10) : rawValue;
     setFormData((prev) => ({
       ...prev,
-      [field]: e.target.value,
+      [field]: nextValue,
     }));
   };
 
   const handleSubmit = async () => {
-    if (!formData.companyName.trim() || !formData.registeredAddress.trim()) {
-      alert('Please fill in required fields (Company Name and Registered Address)');
+    const phoneDigits = formData.phoneNumber.replace(/\D/g, '');
+    if (!formData.companyName.trim() || !phoneDigits || !formData.registeredAddress.trim()) {
+      alert('Please fill in required fields (Company Name, Mobile Number, and Registered Address)');
+      return;
+    }
+
+    if (phoneDigits.length !== 10) {
+      alert('Please enter a valid 10-digit mobile number');
       return;
     }
 
@@ -48,6 +58,7 @@ export const AddCompanyPage: FC<AddCompanyPageProps> = ({
       setLoading(true);
       await CompaniesApi.create({
         name: formData.companyName.trim(),
+        phone: phoneDigits,
         gstin: formData.gstNumber.trim() || 'N/A',
         address: formData.registeredAddress.trim(),
         avatarLetter: formData.companyName.trim().charAt(0).toUpperCase(),
@@ -59,7 +70,11 @@ export const AddCompanyPage: FC<AddCompanyPageProps> = ({
       }
     } catch (err) {
       console.error('Failed to create company:', err);
-      alert('Error creating company. Please check your backend connection.');
+      alert(
+        err instanceof Error && err.message
+          ? err.message
+          : 'Error creating company. Please check your backend connection.'
+      );
     } finally {
       setLoading(false);
     }
@@ -185,6 +200,61 @@ export const AddCompanyPage: FC<AddCompanyPageProps> = ({
               </Box>
             </Box>
 
+            {/* Phone Number Field */}
+            <Box>
+              <Typography
+                sx={{
+                  fontSize: '13px',
+                  fontWeight: 700,
+                  color: '#1E293B',
+                  mb: 1,
+                  letterSpacing: '-0.01em',
+                }}
+              >
+                Mobile Number *
+              </Typography>
+              <Box
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  backgroundColor: '#F8FAFC',
+                  border: '1px solid #E2E8F0',
+                  borderRadius: '8px',
+                  px: 1.5,
+                  height: '42px',
+                  transition: 'all 0.15s ease',
+                  '&:focus-within': {
+                    borderColor: '#0B4DB7',
+                    backgroundColor: '#FFFFFF',
+                    boxShadow: '0 0 0 3px rgba(11, 77, 183, 0.1)',
+                  },
+                }}
+              >
+                <InputBase
+                  fullWidth
+                  required
+                  type="tel"
+                  placeholder="Enter 10-digit mobile number"
+                  value={formData.phoneNumber}
+                  onChange={handleChange('phoneNumber')}
+                  inputProps={{
+                    maxLength: 10,
+                    inputMode: 'numeric',
+                    pattern: '[0-9]{10}',
+                  }}
+                  sx={{
+                    fontSize: '13.5px',
+                    fontWeight: 500,
+                    color: '#0F172A',
+                    '& input::placeholder': {
+                      color: '#94A3B8',
+                      opacity: 1,
+                    },
+                  }}
+                />
+              </Box>
+            </Box>
+
             {/* GST Number Field */}
             <Box>
               <Typography
@@ -234,7 +304,7 @@ export const AddCompanyPage: FC<AddCompanyPageProps> = ({
             </Box>
 
             {/* Registered Address Field */}
-            <Box sx={{ gridColumn: { sm: 'span 2' } }}>
+            <Box>
               <Typography
                 sx={{
                   fontSize: '13px',

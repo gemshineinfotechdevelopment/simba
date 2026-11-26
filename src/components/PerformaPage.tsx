@@ -67,6 +67,7 @@ interface ProductRowItem {
   requiredCases: string;
   rate: string;
   pktUnit: string;
+  gstPercent?: string;
   measurement?: string;
   allocatedAmount: string;
 }
@@ -83,6 +84,7 @@ interface EditProductItem {
   remainingCases?: number;
   rate: number | string;
   pktPerUnit: number | string;
+  gstPercent?: number | string;
   measurement?: string;
   allocatedAmount: number | string;
 }
@@ -136,9 +138,9 @@ export const PerformaPage: FC<PerformaPageProps> = ({
   const [productCode, setProductCode] = useState<string>('');
   const [productName, setProductName] = useState<string>('');
   const [productCompany, setProductCompany] = useState<string>('');
-  const [requiredCases, setRequiredCases] = useState<string>('');
   const [rate, setRate] = useState<string>('');
   const [pktUnit, setPktUnit] = useState<string>('1');
+  const [gstPercent, setGstPercent] = useState<string>('');
   const [productMeasurement, setProductMeasurement] = useState<string>('');
   const [savedMeasurements, setSavedMeasurements] = useState<string[]>([]);
 
@@ -303,6 +305,11 @@ export const PerformaPage: FC<PerformaPageProps> = ({
       const defaultRate = prod.amount ?? prod.rate;
       setRate(defaultRate !== undefined && defaultRate !== null && Number(defaultRate) > 0 ? String(defaultRate) : '');
       setPktUnit(prod.pktUnit || '1');
+      setGstPercent(
+        prod.gstPercent !== undefined && prod.gstPercent !== null && Number(prod.gstPercent) > 0
+          ? String(prod.gstPercent)
+          : ''
+      );
       setProductMeasurement(prod.measurement ? String(prod.measurement) : '');
       // If product has a brand name and user hasn't typed one yet, autofill it
       if (prod.companyName && prod.companyName.toLowerCase() !== 'general') {
@@ -315,6 +322,7 @@ export const PerformaPage: FC<PerformaPageProps> = ({
       setProductCode('');
       setRate('');
       setPktUnit('1');
+      setGstPercent('');
       setProductMeasurement('');
     }
   };
@@ -326,18 +334,15 @@ export const PerformaPage: FC<PerformaPageProps> = ({
       setToast({ open: true, message: 'Please select or enter a product name', severity: 'error' });
       return;
     }
-    const casesVal = parseFloat(requiredCases) || 0;
-    if (casesVal <= 0) {
-      setToast({ open: true, message: 'Please enter a valid required case count > 0', severity: 'error' });
-      return;
-    }
     const rateVal = parseFloat(rate) || 0;
     if (rateVal <= 0) {
       setToast({ open: true, message: 'Please enter a valid rate > 0', severity: 'error' });
       return;
     }
     const unitsVal = parseFloat(pktUnit) || 1;
-    const allocatedAmt = (casesVal * rateVal * unitsVal).toFixed(2);
+    const gstValNum = Math.max(0, parseFloat(gstPercent) || 0);
+    const baseAmt = rateVal * unitsVal;
+    const allocatedAmt = (gstValNum > 0 ? baseAmt * (1 + gstValNum / 100) : baseAmt).toFixed(2);
 
     const rowCompany =
       productCompany.trim() ||
@@ -352,9 +357,10 @@ export const PerformaPage: FC<PerformaPageProps> = ({
       productName: trimmedName,
       companyName: rowCompany,
       category: selectedProductObj?.category || 'Trading',
-      requiredCases: String(casesVal),
+      requiredCases: '',
       rate: String(rateVal),
       pktUnit: String(unitsVal),
+      gstPercent: gstValNum > 0 ? String(gstValNum) : '',
       measurement: productMeasurement.trim(),
       allocatedAmount: allocatedAmt,
     };
@@ -365,9 +371,9 @@ export const PerformaPage: FC<PerformaPageProps> = ({
     setSelectedProductObj(null);
     setProductName('');
     setProductCode('');
-    setRequiredCases('');
     setRate('');
     setPktUnit('1');
+    setGstPercent('');
     setProductMeasurement('');
   };
 
@@ -400,10 +406,6 @@ export const PerformaPage: FC<PerformaPageProps> = ({
   }, [productRows]);
 
   // Calculate Aggregates
-  const totalRequiredCasesCount = useMemo(() => {
-    return productRows.reduce((acc, r) => acc + (parseFloat(r.requiredCases) || 0), 0);
-  }, [productRows]);
-
   const subtotalAllocatedValue = useMemo(() => {
     return productRows.reduce((acc, r) => acc + (parseFloat(r.allocatedAmount) || 0), 0);
   }, [productRows]);
@@ -501,9 +503,9 @@ export const PerformaPage: FC<PerformaPageProps> = ({
     setProductName('');
     setProductCode('');
     setProductCompany('');
-    setRequiredCases('');
     setRate('');
     setPktUnit('1');
+    setGstPercent('');
     setProductMeasurement('');
     try {
       const nextRes = await PerformasApi.getNextNumber();
@@ -560,6 +562,7 @@ export const PerformaPage: FC<PerformaPageProps> = ({
           requiredCases: parseFloat(r.requiredCases) || 0,
           rate: parseFloat(r.rate) || 0,
           pktPerUnit: parseFloat(r.pktUnit) || 1,
+          gstPercent: parseFloat(r.gstPercent || '0') || 0,
           measurement: r.measurement || '',
           allocatedAmount: parseFloat(r.allocatedAmount) || 0,
         })),
@@ -666,6 +669,7 @@ export const PerformaPage: FC<PerformaPageProps> = ({
         remainingCases: p.remainingCases,
         rate: p.rate,
         pktPerUnit: p.pktPerUnit || 1,
+        gstPercent: p.gstPercent || 0,
         measurement: p.measurement || p.productSnapshot?.measurement || '',
         allocatedAmount: p.allocatedAmount,
       })),
@@ -724,6 +728,7 @@ export const PerformaPage: FC<PerformaPageProps> = ({
         remainingCases: p.remainingCases || p.requiredCases || 0,
         rate: p.rate || 0,
         pktPerUnit: p.pktPerUnit || 1,
+        gstPercent: p.gstPercent || 0,
         measurement: p.measurement || p.productSnapshot?.measurement || '',
         allocatedAmount: p.allocatedAmount || (p.requiredCases || 0) * (p.rate || 0) * (p.pktPerUnit || 1),
       }));
@@ -739,7 +744,7 @@ export const PerformaPage: FC<PerformaPageProps> = ({
 
   const handleEditProductChange = (
     id: string,
-    field: 'requiredCases' | 'rate' | 'pktPerUnit' | 'companyName' | 'productName' | 'measurement',
+    field: 'requiredCases' | 'rate' | 'pktPerUnit' | 'gstPercent' | 'companyName' | 'productName' | 'measurement',
     val: string
   ) => {
     setEditProducts((prev) =>
@@ -749,7 +754,10 @@ export const PerformaPage: FC<PerformaPageProps> = ({
         const req = parseFloat(String(updated.requiredCases)) || 0;
         const rt = parseFloat(String(updated.rate)) || 0;
         const pkt = parseFloat(String(updated.pktPerUnit)) || 1;
-        updated.allocatedAmount = (req * rt * pkt).toFixed(2);
+        const gst = Math.max(0, parseFloat(String(updated.gstPercent ?? 0)) || 0);
+        const effectiveCases = req > 0 ? req : 1;
+        const baseAmt = effectiveCases * rt * pkt;
+        updated.allocatedAmount = (gst > 0 ? baseAmt * (1 + gst / 100) : baseAmt).toFixed(2);
         return updated;
       })
     );
@@ -855,6 +863,7 @@ export const PerformaPage: FC<PerformaPageProps> = ({
           usedCases: p.usedCases || 0,
           rate: parseFloat(String(p.rate)) || 0,
           pktPerUnit: parseFloat(String(p.pktPerUnit)) || 1,
+          gstPercent: parseFloat(String(p.gstPercent ?? 0)) || 0,
           measurement: p.measurement || '',
           allocatedAmount: parseFloat(String(p.allocatedAmount)) || 0,
         })),
@@ -1286,7 +1295,7 @@ export const PerformaPage: FC<PerformaPageProps> = ({
                   />
                 </Box>
                 <Typography sx={{ fontSize: '12px', color: '#64748B', mt: 0.4 }}>
-                  Select/type company first at top. Then enter products and cases. Grouped like wholesale order sheets.
+                  Select/type company first at top. Then enter products, measurement, rate & units/pkt. Grouped like wholesale order sheets.
                 </Typography>
               </Box>
 
@@ -1400,7 +1409,7 @@ export const PerformaPage: FC<PerformaPageProps> = ({
               <Box
                 sx={{
                   display: 'grid',
-                  gridTemplateColumns: { xs: '1fr', sm: '2.2fr 1.3fr 1fr 0.9fr 0.75fr auto' },
+                  gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: '2.2fr 1.25fr 0.95fr 0.85fr 0.85fr auto' },
                   gap: 1.5,
                   alignItems: 'center',
                 }}
@@ -1410,8 +1419,13 @@ export const PerformaPage: FC<PerformaPageProps> = ({
                   options={filteredProductsForEntry}
                   getOptionLabel={(option) => {
                     if (typeof option === 'string') return option;
-                    return `${option.name || ''} ${option.code ? `(${option.code})` : ''} ${option.companyName ? `• ${option.companyName}` : ''}`.trim();
+                    return option.name || '';
                   }}
+                  isOptionEqualToValue={(option, val) =>
+                    typeof val === 'string'
+                      ? option.name === val
+                      : Boolean((option._id && val._id && option._id === val._id) || option.name === val.name)
+                  }
                   value={selectedProductObj}
                   onChange={(_e, val) => handleProductSelect(val)}
                   freeSolo
@@ -1470,16 +1484,6 @@ export const PerformaPage: FC<PerformaPageProps> = ({
                   fontSize="13.5px"
                 />
 
-                {/* Required Cases */}
-                <TextField
-                  label="Required Cases"
-                  size="small"
-                  type="number"
-                  value={requiredCases}
-                  onChange={(e) => setRequiredCases(e.target.value)}
-                  placeholder="Enter Cases (e.g. 1)"
-                />
-
                 {/* Rate */}
                 <TextField
                   label="Rate (₹)"
@@ -1497,6 +1501,29 @@ export const PerformaPage: FC<PerformaPageProps> = ({
                   type="number"
                   value={pktUnit}
                   onChange={(e) => setPktUnit(e.target.value)}
+                  placeholder="e.g. 1"
+                />
+
+                {/* GST % */}
+                <TextField
+                  label="GST %"
+                  size="small"
+                  type="number"
+                  value={gstPercent}
+                  onChange={(e) => setGstPercent(e.target.value)}
+                  placeholder="e.g. 18"
+                  slotProps={{
+                    htmlInput: { min: 0, max: 100, step: 'any' },
+                    input: {
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          <Typography sx={{ fontSize: '12px', fontWeight: 700, color: '#475569' }}>
+                            %
+                          </Typography>
+                        </InputAdornment>
+                      ),
+                    },
+                  }}
                 />
 
                 {/* Add Button */}
@@ -1541,12 +1568,11 @@ export const PerformaPage: FC<PerformaPageProps> = ({
                     No product requirements added yet.
                   </Typography>
                   <Typography sx={{ fontSize: '12.5px', color: '#94A3B8', mt: 0.5 }}>
-                    Select a company above, enter product name & required cases, then click <strong>+ Add</strong>.
+                    Select a company above, enter product name, rate & units/pkt, then click <strong>+ Add</strong>.
                   </Typography>
                 </Box>
               ) : (
                 Object.entries(groupedProductRows).map(([groupComp, items]) => {
-                  const groupCases = items.reduce((acc, it) => acc + (parseFloat(it.requiredCases) || 0), 0);
                   const groupAmount = items.reduce((acc, it) => acc + (parseFloat(it.allocatedAmount) || 0), 0);
 
                   return (
@@ -1602,7 +1628,7 @@ export const PerformaPage: FC<PerformaPageProps> = ({
 
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                           <Chip
-                            label={`Subtotal: ${groupCases} Cases • ₹${groupAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
+                            label={`Subtotal: ₹${groupAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
                             size="small"
                             sx={{
                               height: '24px',
@@ -1627,19 +1653,19 @@ export const PerformaPage: FC<PerformaPageProps> = ({
                               <TableCell sx={{ fontWeight: 800, color: '#64748B', fontSize: '11px', textTransform: 'uppercase' }}>
                                 CUSTOMER PRODUCT REQUIRED
                               </TableCell>
-                              <TableCell sx={{ fontWeight: 800, textAlign: 'center', color: '#64748B', width: '115px', fontSize: '11px', textTransform: 'uppercase' }}>
+                              <TableCell sx={{ fontWeight: 800, textAlign: 'center', color: '#64748B', width: '130px', fontSize: '11px', textTransform: 'uppercase' }}>
                                 MEASUREMENT
                               </TableCell>
-                              <TableCell sx={{ fontWeight: 800, textAlign: 'center', color: '#64748B', width: '130px', fontSize: '11px', textTransform: 'uppercase' }}>
-                                REQUIRED CASES
-                              </TableCell>
-                              <TableCell sx={{ fontWeight: 800, textAlign: 'right', color: '#64748B', width: '110px', fontSize: '11px', textTransform: 'uppercase' }}>
+                              <TableCell sx={{ fontWeight: 800, textAlign: 'right', color: '#64748B', width: '125px', fontSize: '11px', textTransform: 'uppercase' }}>
                                 RATE (₹)
                               </TableCell>
-                              <TableCell sx={{ fontWeight: 800, textAlign: 'center', color: '#64748B', width: '90px', fontSize: '11px', textTransform: 'uppercase' }}>
+                              <TableCell sx={{ fontWeight: 800, textAlign: 'center', color: '#64748B', width: '95px', fontSize: '11px', textTransform: 'uppercase' }}>
                                 UNITS/PKT
                               </TableCell>
-                              <TableCell sx={{ fontWeight: 800, textAlign: 'right', color: '#64748B', width: '130px', fontSize: '11px', textTransform: 'uppercase' }}>
+                              <TableCell sx={{ fontWeight: 800, textAlign: 'center', color: '#64748B', width: '90px', fontSize: '11px', textTransform: 'uppercase' }}>
+                                GST %
+                              </TableCell>
+                              <TableCell sx={{ fontWeight: 800, textAlign: 'right', color: '#64748B', width: '140px', fontSize: '11px', textTransform: 'uppercase' }}>
                                 AMOUNT (₹)
                               </TableCell>
                               <TableCell sx={{ fontWeight: 800, textAlign: 'center', width: '80px', fontSize: '11px', textTransform: 'uppercase' }}>
@@ -1673,14 +1699,31 @@ export const PerformaPage: FC<PerformaPageProps> = ({
                                     '-'
                                   )}
                                 </TableCell>
-                                <TableCell sx={{ textAlign: 'center', fontWeight: 800, color: '#0B4DB7', fontSize: '13px' }}>
-                                  {row.requiredCases} Cases
-                                </TableCell>
                                 <TableCell sx={{ textAlign: 'right', fontWeight: 600, color: '#334155', fontSize: '13px' }}>
                                   ₹{parseFloat(row.rate).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                                 </TableCell>
                                 <TableCell sx={{ textAlign: 'center', color: '#64748B', fontSize: '12.5px' }}>
                                   {row.pktUnit}
+                                </TableCell>
+                                <TableCell sx={{ textAlign: 'center', fontSize: '12.5px' }}>
+                                  {row.gstPercent && parseFloat(row.gstPercent) > 0 ? (
+                                    <Chip
+                                      label={`${row.gstPercent}%`}
+                                      size="small"
+                                      sx={{
+                                        height: '22px',
+                                        fontSize: '11.5px',
+                                        fontWeight: 700,
+                                        backgroundColor: '#F0FDF4',
+                                        color: '#166534',
+                                        border: '1px solid #BBF7D0',
+                                      }}
+                                    />
+                                  ) : (
+                                    <Typography component="span" sx={{ fontSize: '12.5px', color: '#94A3B8' }}>
+                                      -
+                                    </Typography>
+                                  )}
                                 </TableCell>
                                 <TableCell sx={{ textAlign: 'right', fontWeight: 800, color: '#16A34A', fontSize: '13px' }}>
                                   ₹{parseFloat(row.allocatedAmount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
@@ -1707,7 +1750,7 @@ export const PerformaPage: FC<PerformaPageProps> = ({
               )}
             </Box>
 
-            {/* 4. Total Cases & Items Summary Strip */}
+            {/* 4. Items Summary Strip */}
             <Box
               sx={{
                 p: 2,
@@ -1743,10 +1786,10 @@ export const PerformaPage: FC<PerformaPageProps> = ({
                 }}
               >
                 <Typography sx={{ fontSize: '11px', fontWeight: 800, color: '#64748B', textTransform: 'uppercase' }}>
-                  Case Total
+                  Items Subtotal
                 </Typography>
                 <Typography sx={{ fontSize: '18px', fontWeight: 900, color: '#0B4DB7' }}>
-                  {totalRequiredCasesCount} Cases
+                  ₹{subtotalAllocatedValue.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                 </Typography>
               </Card>
             </Box>
@@ -1858,17 +1901,6 @@ export const PerformaPage: FC<PerformaPageProps> = ({
               >
                 {/* Live Breakdown Badges */}
                 <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: { xs: 1.5, sm: 2.5 }, alignItems: 'center' }}>
-                  <Box>
-                    <Typography sx={{ fontSize: '10.5px', color: '#64748B', fontWeight: 700, textTransform: 'uppercase' }}>
-                      Total Cases
-                    </Typography>
-                    <Typography sx={{ fontSize: '16px', fontWeight: 800, color: '#0F172A' }}>
-                      {totalRequiredCasesCount}
-                    </Typography>
-                  </Box>
-
-                  <Box sx={{ height: '28px', width: '1px', backgroundColor: '#CBD5E1', display: { xs: 'none', sm: 'block' } }} />
-
                   <Box>
                     <Typography sx={{ fontSize: '10.5px', color: '#64748B', fontWeight: 700, textTransform: 'uppercase' }}>
                       Subtotal

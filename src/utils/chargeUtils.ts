@@ -5,12 +5,7 @@ export interface ParsedChargeValue {
   cleanNum: string;
 }
 
-/**
- * Parses a charge string (Discount, Packing, or Tax).
- * Values strictly under 100 (or containing '%') are treated as percentages unless
- * prefixed with a currency marker ('₹' or 'rs'); 3-digit+ numbers (>= 100) without '%' are flat rupees.
- */
-export const parseChargeValue = (rawVal: unknown, base: number): ParsedChargeValue => {
+const parseSingleChargeValue = (rawVal: unknown, base: number): ParsedChargeValue => {
   const rawStr = String(rawVal ?? '').trim();
   if (!rawStr) return { amount: 0, isPercent: false, num: 0, cleanNum: '' };
 
@@ -26,10 +21,50 @@ export const parseChargeValue = (rawVal: unknown, base: number): ParsedChargeVal
 };
 
 /**
+ * Parses a charge string (Discount, Packing, or Tax).
+ * Values strictly under 100 (or containing '%') are treated as percentages unless
+ * prefixed with a currency marker ('₹' or 'rs'); 3-digit+ numbers (>= 100) without '%' are flat rupees.
+ * Also supports combined '+' expressions such as "18% + ₹500".
+ */
+export const parseChargeValue = (rawVal: unknown, base: number): ParsedChargeValue => {
+  const rawStr = String(rawVal ?? '').trim();
+  if (!rawStr) return { amount: 0, isPercent: false, num: 0, cleanNum: '' };
+
+  if (rawStr.includes('+')) {
+    const parts = rawStr
+      .split('+')
+      .map((part) => parseSingleChargeValue(part, base))
+      .filter((parsed) => parsed.num > 0);
+    if (parts.length === 0) return { amount: 0, isPercent: false, num: 0, cleanNum: '' };
+    const totalAmount = parts.reduce((sum, p) => sum + p.amount, 0);
+    return {
+      amount: totalAmount,
+      isPercent: false,
+      num: totalAmount,
+      cleanNum: String(totalAmount),
+    };
+  }
+
+  return parseSingleChargeValue(rawStr, base);
+};
+
+/**
  * Formats a Discount, Packing, or Tax value consistently as '%' or '₹'.
  */
 export const formatChargeDisplay = (rawVal: unknown, emptyFallback = '-'): string => {
-  const parsed = parseChargeValue(rawVal, 100);
+  const rawStr = String(rawVal ?? '').trim();
+  if (!rawStr) return emptyFallback;
+
+  if (rawStr.includes('+')) {
+    const formatted = rawStr
+      .split('+')
+      .map((part) => parseSingleChargeValue(part, 100))
+      .filter((p) => p.num > 0)
+      .map((p) => (p.isPercent ? `${p.cleanNum}%` : `₹${p.num.toLocaleString('en-IN')}`));
+    return formatted.length > 0 ? formatted.join(' + ') : emptyFallback;
+  }
+
+  const parsed = parseSingleChargeValue(rawStr, 100);
   if (parsed.num <= 0) return emptyFallback;
   return parsed.isPercent
     ? `${parsed.cleanNum}%`

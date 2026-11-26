@@ -9,6 +9,8 @@ export interface ICustomer extends Document {
   address: string;
   mobile: string;
   gst: string;
+  taxIdType?: 'GSTIN' | 'PAN' | 'AADHAAR';
+  state?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -23,6 +25,13 @@ const CustomerSchema: Schema = new Schema(
     address: { type: String, required: true, trim: true },
     mobile: { type: String, required: true, trim: true },
     gst: { type: String, required: true, trim: true },
+    taxIdType: {
+      type: String,
+      enum: ['GSTIN', 'PAN', 'AADHAAR'],
+      default: 'GSTIN',
+      trim: true,
+    },
+    state: { type: String, trim: true, default: '' },
   },
   { timestamps: true }
 );
