@@ -144,10 +144,27 @@ export const AccountsApi = {
     creditAmount: string | number;
     date: string;
     paymentMode?: string;
+    bankName?: string;
+    transferredTo?: string;
     reference?: string;
     notes?: string;
   }) => request<any>('/accounts/credit', { method: 'POST', body: JSON.stringify(data) }),
   delete: (id: string) => request<any>(`/accounts/${id}`, { method: 'DELETE' }),
+  getOptions: (category?: 'BANK' | 'TRANSFERRED_TO') =>
+    request<Array<{ _id: string; category: 'BANK' | 'TRANSFERRED_TO'; name: string }>>(
+      `/accounts/options${category ? `?category=${encodeURIComponent(category)}` : ''}`
+    ),
+  createOption: (data: { category: 'BANK' | 'TRANSFERRED_TO'; name: string }) =>
+    request<{ _id: string; category: 'BANK' | 'TRANSFERRED_TO'; name: string }>('/accounts/options', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateOption: (id: string, name: string) =>
+    request<{ _id: string; category: 'BANK' | 'TRANSFERRED_TO'; name: string }>(`/accounts/options/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ name }),
+    }),
+  deleteOption: (id: string) => request<any>(`/accounts/options/${id}`, { method: 'DELETE' }),
 };
 
 // Performas API

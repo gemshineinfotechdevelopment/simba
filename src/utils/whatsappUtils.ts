@@ -8,7 +8,7 @@ import {
   generateCustomerListPrintHtml,
 } from './printUtils';
 import type { BillPrintData } from '../components/BillPrintTemplate';
-import { formatChargeDisplay } from './chargeUtils';
+import { formatAmountInWords, formatChargeDisplay } from './chargeUtils';
 import { summarizePerformaProductSpecs } from './measurements';
 
 /**
@@ -228,6 +228,7 @@ ${itemsText || '-'}
 *Packing:* ${packingText}
 *Tax:* ${taxText}
 *NET TOTAL:* ₹${bill.total || '0.00'}
+*Amount in Words:* ${formatAmountInWords(parseFloat(String(bill.total || bill.amount || '0').replace(/,/g, '')) || 0)}
 ----------------------------------------
 _Thank you for your business!_
 *Simba*`;

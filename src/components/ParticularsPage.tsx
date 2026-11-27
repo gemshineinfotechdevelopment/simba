@@ -22,6 +22,8 @@ import {
   DialogActions,
   Snackbar,
   Alert,
+  Select,
+  MenuItem,
 } from '@mui/material';
 import AddRoundedIcon from '@mui/icons-material/AddRounded';
 import RemoveRoundedIcon from '@mui/icons-material/RemoveRounded';
@@ -96,6 +98,75 @@ interface ParticularsPageProps {
   initialCustomerName?: string;
   initialSubTab?: ParticularSubTab;
 }
+
+type CreditOptionCategory = 'BANK' | 'TRANSFERRED_TO';
+
+interface CreditOptionItem {
+  _id: string;
+  category: CreditOptionCategory;
+  name: string;
+}
+
+const PAYMENT_TYPE_OPTIONS = [
+  'GPay / PhonePe / UPI',
+  'Cash',
+  'Bank Transfer / NEFT / RTGS',
+  'IMPS',
+  'Cheque',
+  'Card',
+];
+
+const DEFAULT_CREDIT_BANKS = [
+  'HDFC Bank',
+  'State Bank of India (SBI)',
+  'ICICI Bank',
+  'Axis Bank',
+  'Karur Vysya Bank',
+  'Tamilnad Mercantile Bank',
+];
+
+const DEFAULT_CREDIT_TRANSFERRED_TO = [
+  'GPK Cash Counter',
+  'Main Office Cash',
+  'Managing Partner Account',
+];
+
+const CREDIT_OPTION_STORAGE_KEYS: Record<CreditOptionCategory, string> = {
+  BANK: 'simba_credit_bank_options',
+  TRANSFERRED_TO: 'simba_credit_transferred_to_options',
+};
+
+const loadLocalCreditOptions = (category: CreditOptionCategory): CreditOptionItem[] => {
+  const defaults = category === 'BANK' ? DEFAULT_CREDIT_BANKS : DEFAULT_CREDIT_TRANSFERRED_TO;
+  try {
+    const raw = localStorage.getItem(CREDIT_OPTION_STORAGE_KEYS[category]);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.map((item: any, idx: number) => ({
+          _id: String(item._id || `local-${category}-${idx}`),
+          category,
+          name: String(item.name || '').trim(),
+        })).filter((item: CreditOptionItem) => item.name.length > 0);
+      }
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return defaults.map((name, idx) => ({
+    _id: `local-${category}-${idx}`,
+    category,
+    name,
+  }));
+};
+
+const saveLocalCreditOptions = (category: CreditOptionCategory, items: CreditOptionItem[]): void => {
+  try {
+    localStorage.setItem(CREDIT_OPTION_STORAGE_KEYS[category], JSON.stringify(items));
+  } catch {
+    // ignore storage errors
+  }
+};
 
 export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName, initialSubTab }) => {
   const [activeSubTab, setActiveSubTab] = useState<ParticularSubTab>(() => {
@@ -179,8 +250,22 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
   // Subtab 5: Add Credit Form State
   const [addCreditCustomerName, setAddCreditCustomerName] = useState<string>('');
   const [creditAmount, setCreditAmount] = useState<string>('');
-  const [creditPaymentMode, setCreditPaymentMode] = useState<string>('Bank');
-  const [creditNotes, setCreditNotes] = useState<string>('Additional customer advance');
+  const [creditPaymentMode, setCreditPaymentMode] = useState<string>('GPay / PhonePe / UPI');
+  const [bankOptions, setBankOptions] = useState<CreditOptionItem[]>(() => loadLocalCreditOptions('BANK'));
+  const [transferredToOptions, setTransferredToOptions] = useState<CreditOptionItem[]>(() =>
+    loadLocalCreditOptions('TRANSFERRED_TO')
+  );
+  const [creditBankName, setCreditBankName] = useState<string>(
+    () => loadLocalCreditOptions('BANK')[0]?.name || 'HDFC Bank'
+  );
+  const [creditTransferredTo, setCreditTransferredTo] = useState<string>(
+    () => loadLocalCreditOptions('TRANSFERRED_TO')[0]?.name || 'GPK Cash Counter'
+  );
+  const [manageOptionCategory, setManageOptionCategory] = useState<CreditOptionCategory | null>(null);
+  const [newOptionInput, setNewOptionInput] = useState<string>('');
+  const [editingOptionId, setEditingOptionId] = useState<string | null>(null);
+  const [editingOptionValue, setEditingOptionValue] = useState<string>('');
+  const [manageOptionSaving, setManageOptionSaving] = useState<boolean>(false);
   const [creditDate, setCreditDate] = useState<string>(() => {
     const today = new Date();
     return today.toLocaleDateString('en-GB').replace(/\//g, '-');
@@ -754,9 +839,161 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
     }
   };
 
-  // Subtab 5: Submit Credit
+  // Subtab 5: Submit Credit & Managed Options
+  useEffect(() => {
+    let active = true;
+    AccountsApi.getOptions()
+      .then((opts) => {
+        if (!active || !Array.isArray(opts) || opts.length === 0) return;
+        const banks = opts.filter((o) => o.category === 'BANK');
+        const transfers = opts.filter((o) => o.category === 'TRANSFERRED_TO');
+        if (banks.length > 0) {
+          setBankOptions(banks);
+          saveLocalCreditOptions('BANK', banks);
+          setCreditBankName((prev) => (banks.some((b) => b.name === prev) ? prev : banks[0].name));
+        }
+        if (transfers.length > 0) {
+          setTransferredToOptions(transfers);
+          saveLocalCreditOptions('TRANSFERRED_TO', transfers);
+          setCreditTransferredTo((prev) =>
+            transfers.some((t) => t.name === prev) ? prev : transfers[0].name
+          );
+        }
+      })
+      .catch(() => {
+        // Fallback to localStorage/defaults handled by initial state
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const updateCategoryOptions = (
+    category: CreditOptionCategory,
+    updater: (prev: CreditOptionItem[]) => CreditOptionItem[]
+  ) => {
+    const applyUpdate = (prev: CreditOptionItem[]) => {
+      const next = updater(prev);
+      saveLocalCreditOptions(category, next);
+      return next;
+    };
+    if (category === 'BANK') {
+      setBankOptions(applyUpdate);
+    } else {
+      setTransferredToOptions(applyUpdate);
+    }
+  };
+
+  const setSelectedCategoryValue = (category: CreditOptionCategory, value: string) => {
+    if (category === 'BANK') {
+      setCreditBankName(value);
+    } else {
+      setCreditTransferredTo(value);
+    }
+  };
+
+  const activeManageOptions = manageOptionCategory === 'BANK' ? bankOptions : transferredToOptions;
+
+  const handleOpenManageOption = (category: CreditOptionCategory) => {
+    setManageOptionCategory(category);
+    setNewOptionInput('');
+    setEditingOptionId(null);
+    setEditingOptionValue('');
+  };
+
+  const handleAddManagedOption = async () => {
+    if (!manageOptionCategory) return;
+    const trimmed = newOptionInput.trim();
+    if (!trimmed) return;
+    if (activeManageOptions.some((o) => o.name.toLowerCase() === trimmed.toLowerCase())) {
+      alert(`"${trimmed}" already exists.`);
+      return;
+    }
+
+    try {
+      setManageOptionSaving(true);
+      let created: CreditOptionItem;
+      try {
+        created = await AccountsApi.createOption({ category: manageOptionCategory, name: trimmed });
+      } catch {
+        created = { _id: `local-${manageOptionCategory}-${Date.now()}`, category: manageOptionCategory, name: trimmed };
+      }
+      updateCategoryOptions(manageOptionCategory, (prev) => [...prev, created]);
+      setSelectedCategoryValue(manageOptionCategory, created.name);
+      setNewOptionInput('');
+    } finally {
+      setManageOptionSaving(false);
+    }
+  };
+
+  const handleSaveEditedOption = async (item: CreditOptionItem) => {
+    if (!manageOptionCategory) return;
+    const trimmed = editingOptionValue.trim();
+    if (!trimmed) return;
+    if (
+      activeManageOptions.some(
+        (o) => o._id !== item._id && o.name.toLowerCase() === trimmed.toLowerCase()
+      )
+    ) {
+      alert(`"${trimmed}" already exists.`);
+      return;
+    }
+
+    try {
+      setManageOptionSaving(true);
+      let updatedName = trimmed;
+      if (!item._id.startsWith('local-')) {
+        try {
+          const updated = await AccountsApi.updateOption(item._id, trimmed);
+          updatedName = updated?.name || trimmed;
+        } catch {
+          // keep optimistic local rename if endpoint unavailable
+        }
+      }
+      updateCategoryOptions(manageOptionCategory, (prev) =>
+        prev.map((o) => (o._id === item._id ? { ...o, name: updatedName } : o))
+      );
+      const currentSelected =
+        manageOptionCategory === 'BANK' ? creditBankName : creditTransferredTo;
+      if (currentSelected === item.name) {
+        setSelectedCategoryValue(manageOptionCategory, updatedName);
+      }
+      setEditingOptionId(null);
+      setEditingOptionValue('');
+    } finally {
+      setManageOptionSaving(false);
+    }
+  };
+
+  const handleDeleteManagedOption = async (item: CreditOptionItem) => {
+    if (!manageOptionCategory) return;
+    try {
+      setManageOptionSaving(true);
+      if (!item._id.startsWith('local-')) {
+        try {
+          await AccountsApi.deleteOption(item._id);
+        } catch {
+          // proceed with local removal if endpoint unavailable
+        }
+      }
+      const nextList = activeManageOptions.filter((o) => o._id !== item._id);
+      updateCategoryOptions(manageOptionCategory, () => nextList);
+      const currentSelected =
+        manageOptionCategory === 'BANK' ? creditBankName : creditTransferredTo;
+      if (currentSelected === item.name) {
+        setSelectedCategoryValue(manageOptionCategory, nextList[0]?.name || '');
+      }
+    } finally {
+      setManageOptionSaving(false);
+    }
+  };
+
   const handleAddCreditSubmit = async () => {
-    const targetCust = addCreditCustomerName || currentCustomerName || (customerOptions[0]?.name ?? 'General');
+    const targetCust = (addCreditCustomerName || currentCustomerName || '').trim();
+    if (!targetCust) {
+      alert('Please select a Customer Name');
+      return;
+    }
     if (!creditAmount || parseFloat(creditAmount) <= 0) {
       alert('Please enter a valid credit amount');
       return;
@@ -768,16 +1005,16 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
         customerName: targetCust,
         creditAmount: creditAmount.trim(),
         date: creditDate,
-        paymentMode: creditPaymentMode.trim() || 'Bank',
+        paymentMode: creditPaymentMode || 'GPay / PhonePe / UPI',
+        bankName: creditBankName || '',
+        transferredTo: creditTransferredTo || '',
         reference: '',
-        notes: creditNotes.trim(),
       });
 
       alert(res?.message || 'Credit added successfully!');
       setCreditAmount('');
-      setCreditPaymentMode('Bank');
-      setCreditNotes('Additional customer payment');
-      
+      setCreditPaymentMode('GPay / PhonePe / UPI');
+
       // Refresh all financial states
       fetchAccounts(filterCustomer);
       fetchParticulars();
@@ -2951,17 +3188,24 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                           </TableCell>
                           <TableCell align="center" sx={{ py: 1.6, px: { xs: 1.5, sm: 2 }, fontSize: '12.5px', fontWeight: 600, color: '#334155', borderBottom: isLast ? 'none' : '1px solid #EEF2F6' }}>
                             {paymentLabel !== '-' ? (
-                              <Chip
-                                label={paymentLabel}
-                                size="small"
-                                sx={{
-                                  height: '22px',
-                                  fontSize: '11.5px',
-                                  fontWeight: 700,
-                                  backgroundColor: '#EFF6FF',
-                                  color: '#0B4DB7',
-                                }}
-                              />
+                              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.4 }}>
+                                <Chip
+                                  label={paymentLabel}
+                                  size="small"
+                                  sx={{
+                                    height: '22px',
+                                    fontSize: '11.5px',
+                                    fontWeight: 700,
+                                    backgroundColor: '#EFF6FF',
+                                    color: '#0B4DB7',
+                                  }}
+                                />
+                                {(row.bankName || row.transferredTo) && (
+                                  <Typography sx={{ fontSize: '11px', color: '#64748B', fontWeight: 500 }}>
+                                    {[row.bankName, row.transferredTo].filter(Boolean).join(' → ')}
+                                  </Typography>
+                                )}
+                              </Box>
                             ) : (
                               '-'
                             )}
@@ -3401,27 +3645,27 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
             justifyContent: 'center',
             alignItems: 'center',
             width: '100%',
-            py: { xs: 2, sm: 4, md: 5 },
+            py: { xs: 2, sm: 3, md: 4 },
           }}
         >
           <Paper
             elevation={0}
             sx={{
               width: '100%',
-              maxWidth: { xs: '100%', sm: '680px', md: '780px', lg: '840px' },
+              maxWidth: { xs: '100%', sm: '760px', md: '880px', lg: '940px' },
               backgroundColor: '#FFFFFF',
-              borderRadius: '8px',
+              borderRadius: '10px',
               border: '1px solid #E2E8F0',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.06)',
+              boxShadow: '0 4px 14px rgba(15, 23, 42, 0.06)',
               overflow: 'hidden',
             }}
           >
             <Box
               sx={{
-                backgroundColor: '#0B4DB7',
+                background: 'linear-gradient(90deg, #0B4DB7 0%, #0EA5E9 100%)',
                 px: { xs: 2.5, sm: 3.5 },
-                py: 2,
-                minHeight: '52px',
+                py: 1.8,
+                minHeight: '54px',
                 display: 'flex',
                 alignItems: 'center',
               }}
@@ -3434,19 +3678,53 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                   letterSpacing: '-0.01em',
                 }}
               >
-                Add Credit - {currentCustomerName || 'Customer'}
+                Add Credit - {addCreditCustomerName || currentCustomerName || 'Customer'}
               </Typography>
             </Box>
 
             <Box
               sx={{
                 p: { xs: 3, sm: 5, md: 6 },
-                pb: { xs: 4, sm: 6, md: 7 },
+                pb: { xs: 4, sm: 5.5, md: 6 },
                 display: 'flex',
                 flexDirection: 'column',
-                gap: 3,
+                gap: 2.8,
               }}
             >
+              {/* Date */}
+              <Box
+                sx={{
+                  display: 'flex',
+                  flexDirection: { xs: 'column', sm: 'row' },
+                  alignItems: { xs: 'flex-start', sm: 'center' },
+                  gap: { xs: 1, sm: 3.5 },
+                }}
+              >
+                <Typography
+                  sx={{
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    color: '#0F172A',
+                    minWidth: '150px',
+                    textAlign: { sm: 'right' },
+                  }}
+                >
+                  Date
+                </Typography>
+                <DatePickerField
+                  value={creditDate}
+                  onChange={setCreditDate}
+                  placeholder="dd-mm-yyyy"
+                  iconSize={18}
+                  inputSx={{
+                    fontSize: '13.5px',
+                    fontWeight: 500,
+                    height: '42px',
+                    borderRadius: '6px',
+                  }}
+                />
+              </Box>
+
               {/* Customer Name */}
               <Box
                 sx={{
@@ -3487,7 +3765,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                           height: '42px',
                           borderRadius: '6px',
                           fontSize: '13.5px',
-                          fontWeight: 600,
+                          fontWeight: 500,
                           color: '#0F172A',
                           '& fieldset': {
                             borderColor: '#CBD5E1',
@@ -3537,7 +3815,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                     input: {
                       sx: {
                         fontSize: '13.5px',
-                        fontWeight: 600,
+                        fontWeight: 500,
                         height: '42px',
                         backgroundColor: '#FFFFFF',
                         borderRadius: '6px',
@@ -3547,13 +3825,17 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                         '&:hover .MuiOutlinedInput-notchedOutline': {
                           borderColor: '#94A3B8',
                         },
+                        '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                          borderColor: '#0B4DB7',
+                          borderWidth: '1.5px',
+                        },
                       },
                     },
                   }}
                 />
               </Box>
 
-              {/* Payment Method */}
+              {/* Payment Type */}
               <Box
                 sx={{
                   display: 'flex',
@@ -3571,129 +3853,154 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                     textAlign: { sm: 'right' },
                   }}
                 >
-                  Payment Method
+                  Payment Type
                 </Typography>
-                <Autocomplete
+                <Select
                   fullWidth
-                  freeSolo
-                  openOnFocus
-                  disableClearable
                   size="small"
-                  autoHighlight
-                  options={['Cash', 'Bank', 'UPI', 'Bank Transfer', 'Cheque', 'NEFT / RTGS']}
                   value={creditPaymentMode}
-                  inputValue={creditPaymentMode}
-                  filterOptions={(opts, state) => {
-                    const q = state.inputValue.trim().toLowerCase();
-                    if (!q || opts.some((o) => o.toLowerCase() === q)) return opts;
-                    return opts.filter((o) => o.toLowerCase().includes(q));
+                  onChange={(e) => setCreditPaymentMode(String(e.target.value))}
+                  sx={{
+                    height: '42px',
+                    borderRadius: '6px',
+                    fontSize: '13.5px',
+                    fontWeight: 500,
+                    color: '#0F172A',
+                    backgroundColor: '#FFFFFF',
+                    '& .MuiOutlinedInput-notchedOutline': {
+                      borderColor: '#CBD5E1',
+                    },
+                    '&:hover .MuiOutlinedInput-notchedOutline': {
+                      borderColor: '#94A3B8',
+                    },
+                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                      borderColor: '#0B4DB7',
+                      borderWidth: '1.5px',
+                    },
                   }}
-                  onChange={(_, val) => setCreditPaymentMode(typeof val === 'string' ? val : 'Bank')}
-                  onInputChange={(_, newInputValue, reason) => {
-                    if (reason === 'input') {
-                      setCreditPaymentMode(newInputValue);
-                    }
+                >
+                  {PAYMENT_TYPE_OPTIONS.map((opt) => (
+                    <MenuItem key={opt} value={opt} sx={{ fontSize: '13.5px', fontWeight: 500 }}>
+                      {opt}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </Box>
+
+              {/* Bank Name + Transferred To (Managed Selectors) */}
+              {(
+                [
+                  {
+                    label: 'Bank Name',
+                    category: 'BANK' as CreditOptionCategory,
+                    value: bankOptions.some((o) => o.name === creditBankName) ? creditBankName : '',
+                    options: bankOptions,
+                    placeholder: 'Select Bank Name...',
+                    onChange: setCreditBankName,
+                  },
+                  {
+                    label: 'Transferred To',
+                    category: 'TRANSFERRED_TO' as CreditOptionCategory,
+                    value: transferredToOptions.some((o) => o.name === creditTransferredTo)
+                      ? creditTransferredTo
+                      : '',
+                    options: transferredToOptions,
+                    placeholder: 'Select Transferred To...',
+                    onChange: setCreditTransferredTo,
+                  },
+                ]
+              ).map((field) => (
+                <Box
+                  key={field.category}
+                  sx={{
+                    display: 'flex',
+                    flexDirection: { xs: 'column', sm: 'row' },
+                    alignItems: { xs: 'flex-start', sm: 'center' },
+                    gap: { xs: 1, sm: 3.5 },
                   }}
-                  renderInput={(params) => (
-                    <TextField
-                      {...params}
-                      placeholder="Select or type payment method (e.g. Cash, UPI, Bank)"
+                >
+                  <Typography
+                    sx={{
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      color: '#0F172A',
+                      minWidth: '150px',
+                      textAlign: { sm: 'right' },
+                    }}
+                  >
+                    {field.label}
+                  </Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, width: '100%', flex: 1, minWidth: 0 }}>
+                    <Select
+                      fullWidth
+                      size="small"
+                      displayEmpty
+                      value={field.value}
+                      onChange={(e) => field.onChange(String(e.target.value))}
+                      renderValue={(selected) =>
+                        selected ? (
+                          String(selected)
+                        ) : (
+                          <Box component="span" sx={{ color: '#94A3B8' }}>
+                            {field.placeholder}
+                          </Box>
+                        )
+                      }
                       sx={{
-                        backgroundColor: '#FFFFFF',
+                        flex: 1,
+                        minWidth: 0,
+                        height: '42px',
                         borderRadius: '6px',
-                        '& .MuiOutlinedInput-root': {
-                          height: '42px',
-                          borderRadius: '6px',
-                          fontSize: '13.5px',
-                          fontWeight: 600,
-                          color: '#0F172A',
-                          '& fieldset': {
-                            borderColor: '#CBD5E1',
-                          },
-                          '&:hover fieldset': {
-                            borderColor: '#94A3B8',
-                          },
-                          '&.Mui-focused fieldset': {
-                            borderColor: '#0B4DB7',
-                            borderWidth: '1.5px',
-                          },
+                        fontSize: '13.5px',
+                        fontWeight: 500,
+                        color: '#0F172A',
+                        backgroundColor: '#FFFFFF',
+                        '& .MuiOutlinedInput-notchedOutline': {
+                          borderColor: '#CBD5E1',
+                        },
+                        '&:hover .MuiOutlinedInput-notchedOutline': {
+                          borderColor: '#94A3B8',
+                        },
+                        '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                          borderColor: '#0B4DB7',
+                          borderWidth: '1.5px',
                         },
                       }}
-                    />
-                  )}
-                />
-              </Box>
+                    >
+                      {field.options.map((opt) => (
+                        <MenuItem key={opt._id} value={opt.name} sx={{ fontSize: '13.5px', fontWeight: 500 }}>
+                          {opt.name}
+                        </MenuItem>
+                      ))}
+                    </Select>
 
-              {/* Date */}
-              <Box
-                sx={{
-                  display: 'flex',
-                  flexDirection: { xs: 'column', sm: 'row' },
-                  alignItems: { xs: 'flex-start', sm: 'center' },
-                  gap: { xs: 1, sm: 3.5 },
-                }}
-              >
-                <Typography
-                  sx={{
-                    fontSize: '14px',
-                    fontWeight: 600,
-                    color: '#0F172A',
-                    minWidth: '150px',
-                    textAlign: { sm: 'right' },
-                  }}
-                >
-                  Date
-                </Typography>
-                <DatePickerField
-                  value={creditDate}
-                  onChange={setCreditDate}
-                  placeholder="dd-mm-yyyy"
-                  iconSize={18}
-                  inputSx={{
-                    fontSize: '13.5px',
-                    height: '42px',
-                  }}
-                />
-              </Box>
-
-              {/* Notes */}
-              <Box
-                sx={{
-                  display: 'flex',
-                  flexDirection: { xs: 'column', sm: 'row' },
-                  alignItems: { xs: 'flex-start', sm: 'center' },
-                  gap: { xs: 1, sm: 3.5 },
-                }}
-              >
-                <Typography
-                  sx={{
-                    fontSize: '14px',
-                    fontWeight: 600,
-                    color: '#0F172A',
-                    minWidth: '150px',
-                    textAlign: { sm: 'right' },
-                  }}
-                >
-                  Notes
-                </Typography>
-                <TextField
-                  fullWidth
-                  size="small"
-                  placeholder="Notes / Remarks"
-                  value={creditNotes}
-                  onChange={(e) => setCreditNotes(e.target.value)}
-                  slotProps={{
-                    input: {
-                      sx: {
-                        fontSize: '13.5px',
+                    <Button
+                      variant="contained"
+                      disableElevation
+                      onClick={() => handleOpenManageOption(field.category)}
+                      startIcon={<AddRoundedIcon sx={{ fontSize: 18 }} />}
+                      sx={{
+                        backgroundColor: '#155EEF',
+                        color: '#FFFFFF',
                         height: '42px',
-                        backgroundColor: '#FFFFFF',
+                        minWidth: '148px',
+                        px: 2.2,
                         borderRadius: '6px',
-                      },
-                    },
-                  }}
-                />
-              </Box>
+                        fontSize: '13px',
+                        fontWeight: 700,
+                        textTransform: 'none',
+                        whiteSpace: 'nowrap',
+                        flexShrink: 0,
+                        '&:hover': {
+                          backgroundColor: '#0B4DB7',
+                        },
+                      }}
+                    >
+                      Manage / Add
+                    </Button>
+                  </Box>
+                </Box>
+              ))}
 
               {/* Action Button */}
               <Box
@@ -3701,7 +4008,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                   display: 'flex',
                   justifyContent: 'flex-start',
                   pl: { xs: 0, sm: '178px' },
-                  mt: 1,
+                  mt: 0.5,
                 }}
               >
                 <Button
@@ -3710,7 +4017,7 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                   onClick={handleAddCreditSubmit}
                   disabled={creditLoading}
                   sx={{
-                    backgroundColor: '#0B4DB7',
+                    backgroundColor: '#155EEF',
                     color: '#FFFFFF',
                     height: '42px',
                     fontSize: '14px',
@@ -3718,18 +4025,204 @@ export const ParticularsPage: FC<ParticularsPageProps> = ({ initialCustomerName,
                     textTransform: 'none',
                     borderRadius: '6px',
                     px: 3.5,
+                    minWidth: '116px',
                     '&:hover': {
-                      backgroundColor: '#083B8D',
+                      backgroundColor: '#0B4DB7',
                     },
                   }}
                 >
-                  {creditLoading ? 'Saving...' : 'Click to create'}
+                  {creditLoading ? 'Saving...' : 'Submit'}
                 </Button>
               </Box>
             </Box>
           </Paper>
         </Box>
       )}
+
+      {/* Manage / Add Bank Name & Transferred To Dialog */}
+      <Dialog
+        open={Boolean(manageOptionCategory)}
+        onClose={() => !manageOptionSaving && setManageOptionCategory(null)}
+        maxWidth="xs"
+        fullWidth
+        slotProps={{
+          paper: {
+            sx: {
+              borderRadius: '12px',
+              overflow: 'hidden',
+            },
+          },
+        }}
+      >
+        <DialogTitle
+          sx={{
+            background: 'linear-gradient(90deg, #0B4DB7 0%, #0EA5E9 100%)',
+            color: '#FFFFFF',
+            fontSize: '15.5px',
+            fontWeight: 700,
+            py: 1.6,
+            px: 2.5,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          <span>
+            {manageOptionCategory === 'BANK' ? 'Manage / Add Bank Name' : 'Manage / Add Transferred To'}
+          </span>
+          <IconButton
+            size="small"
+            onClick={() => !manageOptionSaving && setManageOptionCategory(null)}
+            sx={{ color: '#FFFFFF' }}
+          >
+            <CloseRoundedIcon fontSize="small" />
+          </IconButton>
+        </DialogTitle>
+
+        <DialogContent sx={{ p: 2.5, pt: 2.5 }}>
+          <Box sx={{ display: 'flex', gap: 1, mb: 2, mt: 0.5 }}>
+            <TextField
+              fullWidth
+              size="small"
+              autoFocus
+              placeholder={
+                manageOptionCategory === 'BANK' ? 'Enter bank name...' : 'Enter recipient / counter...'
+              }
+              value={newOptionInput}
+              onChange={(e) => setNewOptionInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleAddManagedOption();
+                }
+              }}
+            />
+            <Button
+              variant="contained"
+              disableElevation
+              disabled={manageOptionSaving || !newOptionInput.trim()}
+              onClick={handleAddManagedOption}
+              startIcon={<AddRoundedIcon />}
+              sx={{
+                backgroundColor: '#155EEF',
+                textTransform: 'none',
+                fontWeight: 700,
+                px: 2,
+                whiteSpace: 'nowrap',
+                '&:hover': { backgroundColor: '#0B4DB7' },
+              }}
+            >
+              Add
+            </Button>
+          </Box>
+
+          <Box
+            sx={{
+              maxHeight: '260px',
+              overflowY: 'auto',
+              border: '1px solid #E2E8F0',
+              borderRadius: '8px',
+            }}
+          >
+            {activeManageOptions.length === 0 ? (
+              <Typography sx={{ p: 2.5, textAlign: 'center', fontSize: '13px', color: '#94A3B8' }}>
+                No options added yet.
+              </Typography>
+            ) : (
+              activeManageOptions.map((item, idx) => (
+                <Box
+                  key={item._id}
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 1,
+                    px: 1.5,
+                    py: 1,
+                    borderBottom: idx === activeManageOptions.length - 1 ? 'none' : '1px solid #F1F5F9',
+                  }}
+                >
+                  {editingOptionId === item._id ? (
+                    <>
+                      <TextField
+                        fullWidth
+                        size="small"
+                        value={editingOptionValue}
+                        onChange={(e) => setEditingOptionValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleSaveEditedOption(item);
+                          }
+                        }}
+                      />
+                      <IconButton
+                        size="small"
+                        disabled={manageOptionSaving}
+                        onClick={() => handleSaveEditedOption(item)}
+                        sx={{ color: '#16A34A' }}
+                      >
+                        <CheckRoundedIcon fontSize="small" />
+                      </IconButton>
+                      <IconButton
+                        size="small"
+                        onClick={() => {
+                          setEditingOptionId(null);
+                          setEditingOptionValue('');
+                        }}
+                        sx={{ color: '#64748B' }}
+                      >
+                        <CloseRoundedIcon fontSize="small" />
+                      </IconButton>
+                    </>
+                  ) : (
+                    <>
+                      <Typography sx={{ fontSize: '13.5px', fontWeight: 600, color: '#0F172A' }}>
+                        {item.name}
+                      </Typography>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        <Tooltip title="Edit">
+                          <IconButton
+                            size="small"
+                            disabled={manageOptionSaving}
+                            onClick={() => {
+                              setEditingOptionId(item._id);
+                              setEditingOptionValue(item.name);
+                            }}
+                            sx={{ color: '#0B4DB7' }}
+                          >
+                            <ModeEditOutlineRoundedIcon sx={{ fontSize: 17 }} />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="Delete">
+                          <IconButton
+                            size="small"
+                            disabled={manageOptionSaving}
+                            onClick={() => handleDeleteManagedOption(item)}
+                            sx={{ color: '#DC2626' }}
+                          >
+                            <DeleteOutlineRoundedIcon sx={{ fontSize: 17 }} />
+                          </IconButton>
+                        </Tooltip>
+                      </Box>
+                    </>
+                  )}
+                </Box>
+              ))
+            )}
+          </Box>
+        </DialogContent>
+
+        <DialogActions sx={{ px: 2.5, py: 1.5, borderTop: '1px solid #EEF2F6' }}>
+          <Button
+            onClick={() => setManageOptionCategory(null)}
+            disabled={manageOptionSaving}
+            sx={{ textTransform: 'none', fontWeight: 700, color: '#475569' }}
+          >
+            Done
+          </Button>
+        </DialogActions>
+      </Dialog>
       {/* Bill Print & Preview Modal */}
       <BillPrintModal
         open={printModalOpen}

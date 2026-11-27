@@ -1,5 +1,5 @@
 import React from 'react';
-import { calculateBillCharges, formatChargeDisplay } from '../utils/chargeUtils';
+import { calculateBillCharges, formatChargeDisplay, getBillSummaryMeta } from '../utils/chargeUtils';
 
 export interface BillPrintProduct {
   particular: string;
@@ -100,9 +100,7 @@ export const BillPrintTemplate: React.FC<BillPrintTemplateProps> = ({ bill }) =>
     ).size > 1;
 
   const transportName = bill.transport && bill.transport.trim() !== '' && bill.transport !== '-' ? bill.transport.trim() : '-';
-
-  // Check for uploaded Lorry / Godown receipt (pdfData or pdfUrl)
-  const receiptSrc = bill.pdfData || bill.pdfUrl || '';
+  const { itemCount, totalUnits, amountInWords } = getBillSummaryMeta(bill.products, finalTotalNum);
 
   return (
     <div
@@ -269,65 +267,105 @@ export const BillPrintTemplate: React.FC<BillPrintTemplateProps> = ({ bill }) =>
         </tbody>
       </table>
 
-      {/* Bottom Split Section: Left (Uploaded Receipt Image) & Right (Calculation Summary Table) */}
+      {/* Bottom Split Section: Left (Amount in Words) & Right (Calculation Summary Table) */}
       <div
         style={{
           display: 'flex',
           justifyContent: 'space-between',
-          alignItems: 'flex-start',
+          alignItems: 'stretch',
           gap: '16px',
         }}
       >
-        {/* Left Column: Uploaded Godown / Transport Receipt */}
+        {/* Left Column: Amount in Words & Bill Summary */}
         <div
           style={{
             flex: '1 1 50%',
             maxWidth: '48%',
-            border: '1px solid #CBD5E1',
-            borderRadius: '6px',
-            minHeight: '160px',
-            maxHeight: '220px',
+            border: '1px solid #0F172A',
             display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: '#F8FAFC',
-            padding: '6px',
+            flexDirection: 'column',
+            backgroundColor: '#FFFFFF',
             boxSizing: 'border-box',
-            overflow: 'hidden',
           }}
         >
-          {receiptSrc ? (
-            receiptSrc.startsWith('data:image') || receiptSrc.match(/\.(jpeg|jpg|png|webp|gif)$/i) || !receiptSrc.includes('application/pdf') ? (
-              <img
-                src={receiptSrc}
-                alt="Transport / Godown Receipt"
-                style={{
-                  maxWidth: '100%',
-                  maxHeight: '205px',
-                  objectFit: 'contain',
-                  display: 'block',
-                  borderRadius: '4px',
-                }}
-              />
-            ) : (
-              <iframe
-                src={receiptSrc}
-                title="Transport Receipt PDF"
-                style={{
-                  width: '100%',
-                  height: '205px',
-                  border: 'none',
-                }}
-              />
-            )
-          ) : (
-            <div style={{ textAlign: 'center', color: '#64748B', fontSize: '11.5px', padding: '14px' }}>
-              <div style={{ fontWeight: 700, color: '#0F172A', marginBottom: '4px', fontSize: '12px' }}>
-                TRANSPORT / GODOWN RECEIPT
-              </div>
-              <div>(No physical receipt attached for this bill)</div>
+          <div
+            style={{
+              backgroundColor: '#F8FAFC',
+              borderBottom: '1px solid #CBD5E1',
+              padding: '6px 12px',
+              fontSize: '11px',
+              fontWeight: 800,
+              color: '#334155',
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase',
+            }}
+          >
+            Total in Words &amp; Bill Summary
+          </div>
+          <div
+            style={{
+              margin: '8px 10px',
+              padding: '8px 10px',
+              backgroundColor: '#EFF6FF',
+              borderLeft: '3px solid #0B4DB7',
+              borderRadius: '4px',
+            }}
+          >
+            <div
+              style={{
+                fontSize: '10px',
+                fontWeight: 700,
+                color: '#0B4DB7',
+                textTransform: 'uppercase',
+                letterSpacing: '0.03em',
+                marginBottom: '2px',
+              }}
+            >
+              Amount Chargeable (In Words)
             </div>
-          )}
+            <div
+              style={{
+                fontSize: '13px',
+                fontWeight: 800,
+                color: '#0F172A',
+                lineHeight: 1.4,
+              }}
+            >
+              {amountInWords}
+            </div>
+          </div>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              borderTop: '1px solid #E2E8F0',
+              borderBottom: '1px solid #E2E8F0',
+              fontSize: '11.5px',
+              backgroundColor: '#FFFFFF',
+            }}
+          >
+            <div style={{ padding: '6px 12px', borderRight: '1px solid #E2E8F0' }}>
+              <span style={{ color: '#64748B', fontWeight: 600 }}>Items / Qty: </span>
+              <strong style={{ color: '#0F172A' }}>
+                {itemCount} {itemCount === 1 ? 'Item' : 'Items'} • {totalUnits} Units
+              </strong>
+            </div>
+            <div style={{ padding: '6px 12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <span style={{ color: '#64748B', fontWeight: 600 }}>Transport: </span>
+              <strong style={{ color: '#0F172A' }}>{transportName}</strong>
+            </div>
+          </div>
+          <div
+            style={{
+              marginTop: 'auto',
+              backgroundColor: '#F8FAFC',
+              padding: '7px 12px',
+              fontSize: '10.5px',
+              color: '#475569',
+              lineHeight: 1.4,
+            }}
+          >
+          </div>
         </div>
 
         {/* Right Column: Calculation Summary Table */}

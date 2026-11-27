@@ -1,5 +1,5 @@
 import type { BillPrintData } from '../components/BillPrintTemplate';
-import { calculateBillCharges, formatChargeDisplay } from './chargeUtils';
+import { calculateBillCharges, formatChargeDisplay, getBillSummaryMeta } from './chargeUtils';
 import { summarizePerformaProductSpecs } from './measurements';
 
 /**
@@ -116,7 +116,7 @@ export const generateBillHtml = (bill: BillPrintData): string => {
     ).size > 1;
 
   const transportName = bill.transport && bill.transport.trim() !== '' && bill.transport !== '-' ? bill.transport.trim() : '-';
-  const receiptSrc = bill.pdfData || bill.pdfUrl || '';
+  const { itemCount, totalUnits, amountInWords } = getBillSummaryMeta(bill.products, finalTotalNum);
 
   const productRowsHtml = (bill.products || []).map((item, idx) => {
     const numAmt = parseFloat(String(item.amount).replace(/,/g, '')) || 0;
@@ -261,31 +261,74 @@ export const generateBillHtml = (bill: BillPrintData): string => {
     .split-bottom {
       display: flex;
       justify-content: space-between;
-      align-items: flex-start;
+      align-items: stretch;
       gap: 16px;
       page-break-inside: avoid;
     }
-    .receipt-box {
+    .amount-words-box {
       flex: 1 1 50%;
       max-width: 48%;
-      border: 1px solid #CBD5E1;
-      border-radius: 6px;
-      min-height: 160px;
-      max-height: 220px;
+      border: 1px solid #0F172A;
       display: flex;
-      align-items: center;
-      justify-content: center;
-      background: #F8FAFC;
-      padding: 6px;
+      flex-direction: column;
+      background: #FFFFFF;
       box-sizing: border-box;
-      overflow: hidden;
     }
-    .receipt-img {
-      max-width: 100%;
-      max-height: 205px;
-      object-fit: contain;
-      display: block;
+    .amount-words-header {
+      background-color: #F8FAFC;
+      border-bottom: 1px solid #CBD5E1;
+      padding: 6px 12px;
+      font-size: 11px;
+      font-weight: 800;
+      color: #334155;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .amount-words-highlight {
+      margin: 8px 10px;
+      padding: 8px 10px;
+      background-color: #EFF6FF;
+      border-left: 3px solid #0B4DB7;
       border-radius: 4px;
+    }
+    .amount-words-caption {
+      font-size: 10px;
+      font-weight: 700;
+      color: #0B4DB7;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      margin-bottom: 2px;
+    }
+    .amount-words-value {
+      font-size: 13px;
+      font-weight: 800;
+      color: #0F172A;
+      line-height: 1.4;
+    }
+    .amount-words-meta {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      border-top: 1px solid #E2E8F0;
+      border-bottom: 1px solid #E2E8F0;
+      font-size: 11.5px;
+      background: #FFFFFF;
+    }
+    .amount-words-meta-cell {
+      padding: 6px 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .amount-words-meta-cell:first-child {
+      border-right: 1px solid #E2E8F0;
+    }
+    .amount-words-footer {
+      margin-top: auto;
+      background-color: #F8FAFC;
+      padding: 7px 12px;
+      font-size: 10.5px;
+      color: #475569;
+      line-height: 1.4;
     }
     .summary-box {
       flex: 1 1 50%;
@@ -384,18 +427,28 @@ export const generateBillHtml = (bill: BillPrintData): string => {
       </tbody>
     </table>
 
-    <!-- Bottom Split Section: Left Uploaded Receipt & Right Summary Box -->
+    <!-- Bottom Split Section: Left Amount in Words & Right Summary Box -->
     <div class="split-bottom">
-      <!-- Left Column: Uploaded Godown / Transport Receipt -->
-      <div class="receipt-box">
-        ${
-          receiptSrc
-            ? `<img src="${receiptSrc}" class="receipt-img" alt="Transport Receipt" />`
-            : `<div style="text-align: center; color: #64748B; font-size: 11.5px; padding: 14px;">
-                 <div style="font-weight: 700; color: #0F172A; margin-bottom: 4px; font-size: 12px;">TRANSPORT / GODOWN RECEIPT</div>
-                 <div>(No physical receipt attached for this bill)</div>
-               </div>`
-        }
+      <!-- Left Column: Amount in Words & Bill Summary -->
+      <div class="amount-words-box">
+        <div class="amount-words-header">Total in Words &amp; Bill Summary</div>
+        <div class="amount-words-highlight">
+          <div class="amount-words-caption">Amount Chargeable (In Words)</div>
+          <div class="amount-words-value">${amountInWords}</div>
+        </div>
+        <div class="amount-words-meta">
+          <div class="amount-words-meta-cell">
+            <span style="color:#64748B; font-weight:600;">Items / Qty: </span>
+            <strong style="color:#0F172A;">${itemCount} ${itemCount === 1 ? 'Item' : 'Items'} • ${totalUnits} Units</strong>
+          </div>
+          <div class="amount-words-meta-cell">
+            <span style="color:#64748B; font-weight:600;">Transport: </span>
+            <strong style="color:#0F172A;">${transportName}</strong>
+          </div>
+        </div>
+        <div class="amount-words-footer">
+          <strong style="color:#0F172A;">Declaration: </strong>Goods checked and verified at dispatch. Subject to Sivakasi jurisdiction. E. &amp; O.E.
+        </div>
       </div>
 
       <!-- Right Column: Summary Table -->
@@ -977,7 +1030,9 @@ export const generateLedgerStatementHtml = (
       const cred = parseFloat(String(entry.credit || '0').replace(/,/g, '')) || 0;
       const isEven = localIdx % 2 === 1;
 
-      const modeSuffix = entry.type !== 'BILL' && entry.paymentMode ? ` (${entry.paymentMode})` : '';
+      const transferMeta = [entry.bankName, entry.transferredTo].filter(Boolean).join(' -> ');
+      const paymentDesc = [entry.paymentMode, transferMeta].filter(Boolean).join(' - ');
+      const modeSuffix = entry.type !== 'BILL' && paymentDesc ? ` (${paymentDesc})` : '';
       const desc = entry.billNo ? `Bill #${entry.billNo}` : `${entry.type || 'PAYMENT / RECEIPT'}${modeSuffix}`;
 
       return `
